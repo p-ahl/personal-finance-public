@@ -222,3 +222,62 @@ func TestWalletAdjustmentIdempotentAcrossPulls(t *testing.T) {
 		t.Fatalf("rerun of the day-later pull changed the journal: %+v", s4.Sync)
 	}
 }
+
+// Marks are dated at every valuation date (month-ends from the daily price history and each pull
+// date), not lumped into the newest pull; crypto_valuations records quantity, price, value and
+// cost basis per day, and a rerun changes nothing.
+func TestWalletMarksAreDatedAndValuationsRecorded(t *testing.T) {
+	db, cfg, kpull, root := krakenSetup(t)
+	if _, err := ledger.ImportKraken(db, cfg, kpull); err != nil {
+		t.Fatal(err)
+	}
+	wpull := walletPull(t, root)
+	hist := filepath.Join(wpull, "history")
+	if err := os.MkdirAll(hist, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Kraken OHLC rows: [time, open, high, low, close, vwap, volume, count]; 2026-01-31 00:00 UTC closes at 0.05
+	ohlc := `{"error":[],"result":{"KASUSD":[[1769817600,"0.05","0.05","0.05","0.05","0.05","1",1],[1769904000,"0.06","0.06","0.06","0.06","0.06","1",1]]}}`
+	if err := os.WriteFile(filepath.Join(hist, "ohlc_KAS.json"), []byte(ohlc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ledger.ImportWallets(db, cfg, wpull, ""); err != nil {
+		t.Fatal(err)
+	}
+	const kas = "Assets:Crypto:SelfCustody:Cold:KAS"
+	// the 2026-01-31 close is staged; the pull-date candle (2026-02-01 = as_of) is skipped
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM crypto_price_history WHERE commodity='KAS'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("price history rows %d %v", n, err)
+	}
+	// month-end mark exists and values the held quantity at that day's close
+	var q, c int64 // c unused beyond the scan
+	_ = c
+	if err := db.QueryRow(`SELECT COALESCE(SUM(quantity),0), COALESCE(SUM(amount_minor),0) FROM v_ledger WHERE account = ? AND date <= '2026-01-31' AND external_id NOT LIKE 'valuation:wallets:%'`, kas).Scan(&q, &c); err != nil {
+		t.Fatal(err)
+	}
+	if got := sumWhere(t, db, "account = ? AND date <= '2026-01-31'", kas); got != (q*5+5000000000)/10000000000 {
+		t.Fatalf("KAS carried at %d on 2026-01-31, want quantity x 0.05 = %d", got, (q*5+5000000000)/10000000000)
+	}
+	if got := sumWhere(t, db, "external_id = 'valuation:wallets:2026-01-31' AND account = ?", books.UnrealizedAcc); got == 0 {
+		t.Fatal("no unrealized entry on the month-end")
+	}
+	// valuation history: a row per day for the held coin, last day ties to the ledger
+	var v, k int64
+	if err := db.QueryRow(`SELECT value_cents, cost_cents FROM crypto_valuations WHERE val_date = '2026-02-01' AND account = ?`, kas).Scan(&v, &k); err != nil {
+		t.Fatal(err)
+	}
+	if v != 8047 || sumWhere(t, db, "account = ? AND external_id NOT LIKE 'valuation:wallets:%'", kas) != k {
+		t.Fatalf("valuation row value %d cost %d", v, k)
+	}
+	if err := db.QueryRow(`SELECT COUNT(DISTINCT val_date) FROM crypto_valuations WHERE account = ?`, kas).Scan(&n); err != nil || n != 2 { // only 2026-01-31 (close) and 2026-02-01 (pull ticker) have prices in this fixture
+		t.Fatalf("daily rows %d %v", n, err)
+	}
+	s2, err := ledger.ImportWallets(db, cfg, wpull, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s2.Sync.Inserted+s2.Sync.Updated+s2.Sync.Deleted != 0 {
+		t.Fatalf("rerun changed the journal: %+v", s2.Sync)
+	}
+}

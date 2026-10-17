@@ -49,7 +49,7 @@ var SPLTokens = map[string]string{
 }
 
 // HistoryCoins get daily OHLC with --history (wallet coins plus coins seen in swaps).
-var HistoryCoins = []string{"BCH", "BTC", "KAS", "LTC", "SOL", "USDC", "USDT", "XMR"}
+var HistoryCoins = []string{"BCH", "BTC", "KAS", "LTC", "PYUSD", "SOL", "USDC", "USDT", "XMR"}
 
 var priceIDs = map[string][2]string{ // commodity -> Kraken pair, CoinGecko id
 	"KAS": {"KASUSD", "kaspa"}, "BTC": {"XBTUSD", "bitcoin"}, "LTC": {"LTCUSD", "litecoin"},

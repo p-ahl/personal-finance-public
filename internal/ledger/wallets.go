@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/p-ahl/personal-finance/internal/books"
 	"github.com/p-ahl/personal-finance/internal/download/wallets"
@@ -134,6 +136,9 @@ func StageWallets(tx *sql.Tx, dir, cfgPath string, runID int64) (WalletStageStat
 		}
 		st.Prices++
 	}
+	if err := stagePriceHistory(tx, dir, st.AsOf); err != nil {
+		return st, err
+	}
 	// events: optional (without them the wallets are carried at cost by the adjustment only)
 	f, err := os.Open(filepath.Join(dir, "events.csv"))
 	if os.IsNotExist(err) {
@@ -184,6 +189,56 @@ func StageWallets(tx *sql.Tx, dir, cfgPath string, runID int64) (WalletStageStat
 	return st, nil
 }
 
+// stagePriceHistory stores the daily USD closes of a pull's history/ohlc_<COIN>.json (Kraken public
+// OHLC, UTC-day candles, last 720 days) into crypto_price_history. The candle of the pull date
+// itself is still open and skipped; the pull's own ticker price covers that date.
+func stagePriceHistory(tx *sql.Tx, dir, asOf string) error {
+	files, _ := filepath.Glob(filepath.Join(dir, "history", "ohlc_*.json"))
+	sort.Strings(files)
+	for _, f := range files {
+		coin := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(f), "ohlc_"), ".json")
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return err
+		}
+		var doc struct {
+			Error  []string                   `json:"error"`
+			Result map[string]json.RawMessage `json:"result"`
+		}
+		if err := json.Unmarshal(b, &doc); err != nil {
+			return fmt.Errorf("%s: %w", filepath.Base(f), err)
+		}
+		for k, raw := range doc.Result {
+			if k == "last" {
+				continue
+			}
+			var rows [][]json.RawMessage
+			if err := json.Unmarshal(raw, &rows); err != nil {
+				return fmt.Errorf("%s: %w", filepath.Base(f), err)
+			}
+			for _, r := range rows {
+				if len(r) < 5 {
+					continue
+				}
+				var ts float64
+				var closeS string
+				if json.Unmarshal(r[0], &ts) != nil || json.Unmarshal(r[4], &closeS) != nil {
+					continue
+				}
+				day := time.Unix(int64(ts), 0).UTC().Format("2006-01-02")
+				if day >= asOf {
+					continue
+				}
+				if _, err := tx.Exec(`INSERT INTO crypto_price_history(commodity, price_date, price, source) VALUES (?,?,?,'kraken-ohlc-close')
+					ON CONFLICT(commodity, price_date) DO UPDATE SET price=excluded.price, source=excluded.source`, coin, day, closeS); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // LoadWallets reads the staged wallets for the builder.
 func LoadWallets(tx *sql.Tx) (books.WalletData, error) {
 	var wd books.WalletData
@@ -226,6 +281,19 @@ func LoadWallets(tx *sql.Tx) (books.WalletData, error) {
 			return wd, err
 		}
 		wd.Prices = append(wd.Prices, p)
+	}
+	rows.Close()
+	rows, err = tx.Query(`SELECT commodity, price_date, price, source FROM crypto_price_history ORDER BY commodity, price_date`)
+	if err != nil {
+		return wd, err
+	}
+	for rows.Next() {
+		var p books.WalletPrice
+		if err := rows.Scan(&p.Commodity, &p.AsOf, &p.Price, &p.Source); err != nil {
+			rows.Close()
+			return wd, err
+		}
+		wd.History = append(wd.History, p)
 	}
 	rows.Close()
 	rows, err = tx.Query(`SELECT id, time, date, kind, wallet_out, coin_out, qty_out, fee_out, wallet_in, coin_in, qty_in, ref, usd_out, usd_in, confidence, evidence, memo

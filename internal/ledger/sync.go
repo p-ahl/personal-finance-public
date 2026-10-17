@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/p-ahl/personal-finance/internal/books"
+	"github.com/p-ahl/personal-finance/internal/money"
 )
 
 type SyncStats struct {
@@ -183,6 +184,15 @@ func Sync(tx *sql.Tx, res *books.Result, cfg *books.Config, runID int64) (SyncSt
 	for _, p := range res.Prices {
 		if _, err := tx.Exec(`INSERT INTO prices(commodity, price_date, price, currency, source) VALUES (?,?,?,?,?)
 			ON CONFLICT(commodity, price_date, source) DO UPDATE SET price=excluded.price`, p.Commodity, p.Date, p.Price, books.USD, p.Source); err != nil {
+			return st, err
+		}
+	}
+	if _, err := tx.Exec(`DELETE FROM crypto_valuations`); err != nil {
+		return st, err
+	}
+	for _, v := range res.CryptoValuations {
+		if _, err := tx.Exec(`INSERT INTO crypto_valuations(val_date, wallet, account, commodity, quantity, price_usd, price_source, value_cents, cost_cents)
+			VALUES (?,?,?,?,?,?,?,?,?)`, v.Date, v.Wallet, v.Account, v.Commodity, money.Format(v.Quantity, books.CryptoScale), v.Price, v.PriceSource, v.Value, v.CostBasis); err != nil {
 			return st, err
 		}
 	}

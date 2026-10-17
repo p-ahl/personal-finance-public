@@ -161,6 +161,8 @@ type Result struct {
 	// WalletResults: per wallet event replay outcome (cost, gains), including events before
 	// the books (estimates for tax reporting; only booked ones are in the journal).
 	WalletResults []WalletResult
+	// CryptoValuations: daily quantity/price/value/cost basis per self-custody holding
+	CryptoValuations []CryptoValuation
 	// accrual layer
 	Documents    []Document
 	Accruals     []AccrualRecord

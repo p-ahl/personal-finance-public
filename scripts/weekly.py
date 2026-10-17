@@ -664,6 +664,17 @@ def build_html(A, B, theme=""):
         out.append(f"<li>{e(B.label(a))} is down to {m(c1)}; check upcoming autopays drawn from it.</li>")
     out.append("</ul></section>")
 
+    # crypto (self-custody): value change per asset over the week, from crypto_valuations
+    if A.get("crypto"):
+        rows = [row(f'{e(r["asset"])} <span class="sub">· {r["qty"]:,.2f}</span>',
+                    [m(round(r["prior_value"] * 100)), m(round(r["value"] * 100)), m(round((r["value"] - r["prior_value"]) * 100), True),
+                     f'{(r["price"] / r["prior_price"] - 1) * 100:+.1f}%' if r["prior_price"] else ""]) for r in A["crypto"]]
+        tot0, tot1 = sum(r["prior_value"] for r in A["crypto"]), sum(r["value"] for r in A["crypto"])
+        out.append('<section><h2>Crypto in self-custody, this week</h2>')
+        out.append(table(["Asset", "Start", "Now", "Change", "Price"], rows + [row("Total", [m(round(tot0 * 100)), m(round(tot1 * 100)), m(round((tot1 - tot0) * 100), True), ""], "tot")]))
+        out.append('<ul class="notes"><li>Change = market move plus any coins moved in or out. Booked as unrealized gain or loss on each day it happened '
+                   '(not sold, so it can reverse). History and best-time-to-sell: scripts/crypto_history.py.</li></ul></section>')
+
     # 4. upcoming
     a0, a1 = A["window"]
     out.append(f'<section><h2>4. Coming up ({nice(a0)} – {nice(a1)})</h2>')
@@ -833,6 +844,12 @@ def main():
     A = analyse(B, as_of, ws, base, a.goal, plan, prior, a.open_item)
     import charts as C  # trends section (cash vs goal, Profit and Loss by month); validated against the views
     A["charts"] = C.weekly_section(a.db, as_of, a.goal, a.trips.split(",")[0])
+    try:
+        import crypto_history as CH
+        A["crypto"] = CH.weekly_rows(a.db, as_of.isoformat(), A["baseline"].isoformat() if hasattr(A["baseline"], "isoformat") else str(A["baseline"]))
+    except Exception as ex:  # table missing (older DB) or no wallets: skip the section
+        print(f"weekly: crypto section skipped ({ex})", file=sys.stderr)
+        A["crypto"] = []
     open(os.path.join(out, "weekly.html"), "w").write(build_html(A, B))
     xp = os.path.join(out, "weekly.xlsx")
     build_xlsx(xp, A, B)

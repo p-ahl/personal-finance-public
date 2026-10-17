@@ -255,6 +255,16 @@ if [[ $check_status == PASS ]]; then
   fi
 fi
 
+# Crypto history (value vs cost basis per asset, best-time-to-sell retrospective): non-fatal.
+crypto="skipped"
+if [[ $check_status != FAIL && $import_ok == yes && ${WALLETS:-1} != 0 && -f $WCFG ]] && command -v python3 >/dev/null; then
+  if python3 "$REPO/scripts/crypto_history.py" --db "$FINANCE_DB" --as-of "$DATE" --out "$FINANCE_DATA/exports/crypto-$DATE" >>"$LOG" 2>&1; then
+    crypto="\`$FINANCE_DATA/exports/crypto-$DATE\`"
+  else
+    crypto="FAILED (see log)"
+  fi
+fi
+
 {
   echo "# Finance refresh $DATE"
   echo
@@ -276,6 +286,7 @@ fi
   echo "- pending (reported balance includes activity not posted yet): ${pendingl:-none}"
   [[ -n $unrecon ]] && echo "- unreconciled: $unrecon"
   echo "- statements: $statements"
+  echo "- crypto history: $crypto"
   echo "- full output: \`$LOG\`"
 } >"$OUT"
 cat "$OUT" || true

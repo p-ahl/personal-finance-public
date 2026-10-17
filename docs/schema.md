@@ -358,10 +358,21 @@ the wallet's lots on the exchange withdrawals, the two are iterated to a fixed p
   holdings pro rata by market value. Total cost is conserved; no P&L. It is a true-up computed
   from the ledger on that date (earlier pulls' adjustments included), so a later pull with the
   same on-chain data books nothing and a rerun reproduces the same entries.
-- **Mark to market** (`valuation:wallets:<newest pull>`) to `Income:Investments:Unrealized-Gains`
-  and one balance assertion per wallet account (`source = wallets`, including zero balances).
-  `finance check` compares each wallet account's ledger quantity with the on-chain balance
-  (hard failure on any difference) and reports the clearing balance (REVIEW if not zero).
+- **Mark to market** (`valuation:wallets:<date>`) to `Income:Investments:Unrealized-Gains`, dated at
+  every valuation date: each month-end after the first wallet activity, and every pull date. Each
+  mark values the ledger quantity of every wallet account/coin at that date's price and books the
+  difference to its carrying value (cost plus earlier marks), so each period's Profit and Loss
+  carries only that period's market move (the whole-holding change is not dated on the newest
+  pull). Price on a date = the pull's ticker price, else the Kraken daily close stored in
+  `crypto_price_history` (staged from each pull's `history/ohlc_<COIN>.json`, UTC-day candles), else
+  the latest close up to 10 days earlier; a coin with no price is left at cost with a note.
+  Cost basis stays in the lots (the ledger's own cost, marks excluded in `crypto_valuations`).
+  One balance assertion per wallet account at the newest pull (`source = wallets`, including zero
+  balances). `finance check` compares each wallet account's ledger quantity with the on-chain
+  balance (hard failure on any difference) and reports the clearing balance (REVIEW if not zero).
+- `crypto_valuations` (`0009_crypto_valuations.sql`, rebuilt each import): per day from books start
+  and per wallet account/coin: quantity, price (and its source), value and cost basis in cents,
+  for charting value against cost (`scripts/crypto_history.py`).
 - The import prints realized gain/loss on wallet swaps by year (all swaps, including those
   before the books, as estimates) and writes `<pull>/events-booked.csv`;
   `wallet_events.py <pull> --timeline-md/--timeline-csv` renders the local timeline.

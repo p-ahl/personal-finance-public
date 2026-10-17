@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/p-ahl/personal-finance/internal/money"
 )
@@ -34,8 +35,9 @@ import (
 // opening entry at their replayed cost. At every wallet pull date the at-cost adjustment sets
 // each wallet account's quantity to the on-chain balance and moves whatever is left in the
 // Unassigned account (exchange withdrawals not found in any wallet, unmatched items) into the
-// wallet holdings pro rata by market value (total cost unchanged, no P&L). The newest pull
-// marks every wallet to market (Income:Investments:Unrealized-Gains) and adds a balance
+// wallet holdings pro rata by market value (total cost unchanged, no P&L). Every wallet account is
+// marked to market (Income:Investments:Unrealized-Gains) at each month-end and each pull date, so
+// the unrealized gain or loss lands in the period it happened; the newest pull also adds a balance
 // assertion (source = wallets) per wallet account; `finance check` also compares quantities.
 const (
 	WalletSource   = "wallets"
@@ -71,6 +73,7 @@ type WalletData struct {
 	Wallets   []WalletDef
 	Snapshots []WalletSnapshot
 	Prices    []WalletPrice
+	History   []WalletPrice // daily closes (crypto_price_history), all dates
 	Events    []WalletEvent
 }
 
@@ -730,93 +733,226 @@ func buildWallets(in Input, cfg *Config, res *Result, byKey map[string]string, c
 	}
 	open()
 
-	// ---- mark to market at the newest pull + assertions ----
+	// ---- mark to market at every valuation date + assertions at the newest pull ----
 	if n := len(snapDates); n > 0 {
 		D := snapDates[n-1]
 		px := prices[D]
-		book := map[string]map[string][2]int64{} // account -> commodity -> {qty, cost}
-		all := append(append([]Entry(nil), res.Entries...), entries...)
-		for _, e := range all {
-			if e.Date > D {
-				continue
+		hist := map[string]map[string]WalletPrice{} // commodity -> date -> price (daily history table)
+		var histDates = map[string][]string{}
+		for _, p := range wd.History {
+			if hist[p.Commodity] == nil {
+				hist[p.Commodity] = map[string]WalletPrice{}
 			}
-			for _, l := range e.Lines {
-				if l.Commodity == "" {
-					continue
+			hist[p.Commodity][p.AsOf] = p
+			histDates[p.Commodity] = append(histDates[p.Commodity], p.AsOf)
+		}
+		for c := range histDates {
+			sort.Strings(histDates[c])
+		}
+		// priceAt: the pull's own ticker price on a pull date, else the daily close of that date,
+		// else the latest earlier close (at most 10 days back; weekends/outages)
+		priceAt := func(c, d string) (WalletPrice, bool) {
+			if p, ok := prices[d][c]; ok {
+				return p, true
+			}
+			if p, ok := hist[c][d]; ok {
+				return p, true
+			}
+			ds := histDates[c]
+			i := sort.SearchStrings(ds, d)
+			if i > 0 {
+				prev := ds[i-1]
+				if dayGap(prev, d) <= 10 {
+					p := hist[c][prev]
+					return p, true
 				}
-				if _, ok := snapBal[D][l.Account]; !ok {
-					continue
-				}
-				if book[l.Account] == nil {
-					book[l.Account] = map[string][2]int64{}
-				}
-				x := book[l.Account][l.Commodity]
-				if l.Quantity != nil {
-					x[0] += *l.Quantity
-				}
-				x[1] += l.Amount
-				book[l.Account][l.Commodity] = x
+			}
+			return WalletPrice{}, false
+		}
+		// wallet accounts (anything a snapshot or the replay knows)
+		walletAcct := map[string]bool{}
+		for _, m := range snapBal {
+			for a := range m {
+				walletAcct[a] = true
 			}
 		}
+		for a := range pools {
+			walletAcct[a] = true
+		}
+		type ak struct{ a, c string }
+		type pos struct{ qty, cost, marks int64 }
+		base := append(append([]Entry(nil), res.Entries...), entries...)
+		sort.SliceStable(base, func(i, j int) bool { return base[i].Date < base[j].Date })
+		// valuation dates: month-ends after books start plus every pull date, up to the newest pull
+		vset := map[string]bool{}
+		if first := firstOf(base, walletAcct); first != "" {
+			for _, m := range monthEnds(maxStr(first, cut), D) {
+				vset[m] = true
+			}
+		}
+		for _, d := range snapDates {
+			if d > cut {
+				vset[d] = true
+			}
+		}
+		var vdates []string
+		for d := range vset {
+			vdates = append(vdates, d)
+		}
+		sort.Strings(vdates)
+		state := map[ak]*pos{}
+		bi := 0
+		advance := func(d string) {
+			for bi < len(base) && base[bi].Date <= d {
+				for _, l := range base[bi].Lines {
+					if l.Commodity == "" || !walletAcct[l.Account] {
+						continue
+					}
+					k := ak{l.Account, l.Commodity}
+					if state[k] == nil {
+						state[k] = &pos{}
+					}
+					if l.Quantity != nil {
+						state[k].qty += *l.Quantity
+					}
+					state[k].cost += l.Amount
+				}
+				bi++
+			}
+		}
+		sortedKeys := func() []ak {
+			var ks []ak
+			for k := range state {
+				ks = append(ks, k)
+			}
+			sort.Slice(ks, func(i, j int) bool {
+				if ks[i].a != ks[j].a {
+					return ks[i].a < ks[j].a
+				}
+				return ks[i].c < ks[j].c
+			})
+			return ks
+		}
+		usedPx := map[string]map[string]WalletPrice{} // date -> commodity -> price (for the prices table)
+		for _, d := range vdates {
+			advance(d)
+			var mtm []Line
+			var mtmTotal int64
+			for _, k := range sortedKeys() {
+				st := state[k]
+				p, ok := priceAt(k.c, d)
+				mv := int64(0)
+				if st.qty != 0 {
+					if !ok {
+						notes[fmt.Sprintf("no USD price for %s at %s; left at cost", k.c, d)] = true
+						continue
+					}
+					mv, _ = valueCents(st.qty, CryptoScale, p.Price)
+					if usedPx[d] == nil {
+						usedPx[d] = map[string]WalletPrice{}
+					}
+					usedPx[d][k.c] = p
+				}
+				if dl := mv - (st.cost + st.marks); dl != 0 {
+					up := ""
+					if ok {
+						up = p.Price
+					}
+					mtm = append(mtm, Line{Account: k.a, Amount: dl, Currency: USD, Quantity: qptr(0), Commodity: k.c, UnitPrice: up, CategorySource: "valuation", Memo: "mark to market"})
+					mtmTotal += dl
+					st.marks += dl
+				}
+			}
+			if len(mtm) > 0 {
+				mtm = append(mtm, Line{Account: UnrealizedAcc, Amount: -mtmTotal, Currency: USD, CategorySource: "valuation"})
+				entries = append(entries, Entry{Date: d, Description: "Mark to market (self-custody wallets, " + d + " prices)", Type: "valuation",
+					Source: "valuation", ExternalID: "valuation:wallets:" + d, Lines: mtm})
+			}
+		}
+
+		// assertions at the newest pull: on-chain quantity x pull price
 		var accts []string
 		for a := range snapBal[D] {
 			accts = append(accts, a)
 		}
 		sort.Strings(accts)
-		var mtm []Line
-		var mtmTotal int64
-		usedPx := map[string]bool{}
 		for _, a := range accts {
 			var expected int64
-			var coms []string
-			for c := range snapBal[D][a] {
-				coms = append(coms, c)
-			}
-			for c := range book[a] {
-				if _, ok := snapBal[D][a][c]; !ok {
-					coms = append(coms, c)
-				}
-			}
-			sort.Strings(coms)
-			for _, c := range coms {
-				p, ok := px[c]
-				q := book[a][c][0]
-				mv := int64(0)
-				if q != 0 {
-					if !ok {
-						notes[fmt.Sprintf("no USD price for %s at %s; left at cost", c, D)] = true
-						continue
-					}
-					mv, _ = valueCents(q, CryptoScale, p.Price)
-					usedPx[c] = true
-				}
-				if d := mv - book[a][c][1]; d != 0 {
-					up := ""
-					if ok {
-						up = p.Price
-					}
-					mtm = append(mtm, Line{Account: a, Amount: d, Currency: USD, Quantity: qptr(0), Commodity: c, UnitPrice: up, CategorySource: "valuation", Memo: "mark to market"})
-					mtmTotal += d
-				}
-				if sq := snapBal[D][a][c]; sq != 0 && ok {
+			for c, sq := range snapBal[D][a] {
+				if p, ok := px[c]; ok && sq != 0 {
 					v, _ := valueCents(sq, CryptoScale, p.Price)
 					expected += v
 				}
 			}
 			res.Assertions = append(res.Assertions, Assertion{Account: a, AsOf: D, Amount: expected, Source: WalletSource})
 		}
-		var pcs []string
-		for c := range usedPx {
-			pcs = append(pcs, c)
+		var pds []string
+		for d := range usedPx {
+			pds = append(pds, d)
 		}
-		sort.Strings(pcs)
-		for _, c := range pcs {
-			res.Prices = append(res.Prices, Price{Commodity: c, Date: D, Price: px[c].Price, Source: "wallets-" + px[c].Source})
+		sort.Strings(pds)
+		for _, d := range pds {
+			var pcs []string
+			for c := range usedPx[d] {
+				pcs = append(pcs, c)
+			}
+			sort.Strings(pcs)
+			for _, c := range pcs {
+				p := usedPx[d][c]
+				res.Prices = append(res.Prices, Price{Commodity: c, Date: d, Price: p.Price, Source: "wallets-" + p.Source})
+			}
 		}
-		if len(mtm) > 0 {
-			mtm = append(mtm, Line{Account: UnrealizedAcc, Amount: -mtmTotal, Currency: USD, CategorySource: "valuation"})
-			entries = append(entries, Entry{Date: D, Description: "Mark to market (self-custody wallets, " + D + " prices)", Type: "valuation",
-				Source: "valuation", ExternalID: "valuation:wallets:" + D, Lines: mtm})
+
+		// daily valuation history (quantity, price, value, cost basis) from books start to the newest pull
+		res.CryptoValuations = nil
+		st2 := map[ak]*pos{}
+		bi2 := 0
+		walletOf := func(a string) string {
+			for _, w := range wd.Wallets {
+				if a == w.Account || strings.HasPrefix(a, w.Account+":") {
+					return w.Name
+				}
+			}
+			return ""
+		}
+		for d := cut; d <= D; d = nextDay(d) {
+			for bi2 < len(base) && base[bi2].Date <= d {
+				for _, l := range base[bi2].Lines {
+					if l.Commodity == "" || !walletAcct[l.Account] {
+						continue
+					}
+					k := ak{l.Account, l.Commodity}
+					if st2[k] == nil {
+						st2[k] = &pos{}
+					}
+					if l.Quantity != nil {
+						st2[k].qty += *l.Quantity
+					}
+					st2[k].cost += l.Amount
+				}
+				bi2++
+			}
+			var ks []ak
+			for k, v := range st2 {
+				if v.qty != 0 {
+					ks = append(ks, k)
+				}
+			}
+			sort.Slice(ks, func(i, j int) bool {
+				if ks[i].a != ks[j].a {
+					return ks[i].a < ks[j].a
+				}
+				return ks[i].c < ks[j].c
+			})
+			for _, k := range ks {
+				p, ok := priceAt(k.c, d)
+				if !ok {
+					continue
+				}
+				v, _ := valueCents(st2[k].qty, CryptoScale, p.Price)
+				res.CryptoValuations = append(res.CryptoValuations, CryptoValuation{Date: d, Wallet: walletOf(k.a), Account: k.a, Commodity: k.c,
+					Quantity: st2[k].qty, Price: p.Price, PriceSource: p.Source, Value: v, CostBasis: st2[k].cost})
+			}
 		}
 	}
 	res.Entries = append(res.Entries, entries...)
@@ -825,4 +961,60 @@ func buildWallets(in Input, cfg *Config, res *Result, byKey map[string]string, c
 	}
 	sort.Strings(res.Notes)
 	return deposit, nil
+}
+
+// CryptoValuation is one day's holding of one coin in one wallet account: quantity, market price
+// and value, and the cost basis (ledger cost, valuation marks excluded). Persisted by Sync into
+// crypto_valuations (rebuilt every run).
+type CryptoValuation struct {
+	Date, Wallet, Account, Commodity string
+	Quantity                         int64 // CryptoScale units
+	Price, PriceSource               string
+	Value, CostBasis                 int64 // cents
+}
+
+func parseDay(d string) time.Time {
+	t, _ := time.Parse("2006-01-02", d)
+	return t
+}
+
+func nextDay(d string) string { return parseDay(d).AddDate(0, 0, 1).Format("2006-01-02") }
+
+func maxStr(a, b string) string {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// monthEnds lists the last day of every month from from's month through the month before to's
+// (to itself is a pull date, valued separately), strictly after from and before to.
+func monthEnds(from, to string) []string {
+	var out []string
+	t := parseDay(from)
+	t = time.Date(t.Year(), t.Month()+1, 0, 0, 0, 0, 0, time.UTC)
+	for {
+		d := t.Format("2006-01-02")
+		if d >= to {
+			break
+		}
+		if d > from {
+			out = append(out, d)
+		}
+		t = time.Date(t.Year(), t.Month()+2, 0, 0, 0, 0, 0, time.UTC)
+	}
+	return out
+}
+
+// firstOf is the earliest date of an entry touching a wallet account line with a commodity.
+func firstOf(es []Entry, accts map[string]bool) string {
+	first := ""
+	for _, e := range es {
+		for _, l := range e.Lines {
+			if l.Commodity != "" && accts[l.Account] && (first == "" || e.Date < first) {
+				first = e.Date
+			}
+		}
+	}
+	return first
 }
