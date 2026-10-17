@@ -1,0 +1,119 @@
+# TEMPLATE for the accrual layer. Copy to $FINANCE_DATA/config/accruals.yaml (never commit the real one).
+# All names, ids and amounts below are SYNTHETIC. See docs/schema.md §3a for the semantics.
+#
+# Amounts are decimal strings. Selector amounts are signed as booked on the selected ledger account
+# (debit-positive: a card charge is negative on the card, a bank payment is negative on the bank).
+
+documents:
+  - id: bill-hospital-2026-02          # referenced from accruals[].documents
+    kind: bill                          # bill|eob|statement|receipt|invoice|paystub|k1|tax_form|email|contract|other
+    source: gmail                       # gmail|fastmail|drive|manual
+    external_ref: "<message or file id>"
+    doc_date: "2026-03-01"
+    counterparty: Example Hospital
+    amount: "1200.00"
+    service_start: "2026-01-10"
+    service_end: "2026-01-14"
+    title: Statement for inpatient stay
+    local_path: documents/bill/example-hospital-2026-03.pdf   # relative to $FINANCE_DATA
+  - id: tax-return-2025
+    kind: tax_form
+    source: drive
+    external_ref: "<file id>"
+    doc_date: "2026-04-10"
+    title: 2025 Form 1040 (draft)
+
+accruals:
+  # Medical bill: expense in the service month, paid later on a credit card.
+  - id: med-hospital-2026-01
+    kind: payable
+    description: Inpatient stay, billed in March, paid by card
+    counterparty: Example Hospital
+    account: Expenses:Healthcare:Medical
+    balance: Liabilities:Payable:Medical:ExampleHospital
+    date: "2026-01-31"                  # recognition (default: service_end)
+    service_start: "2026-01-10"
+    service_end: "2026-01-14"
+    # amount: defaults to the sum of the settlements
+    settlements:
+      - txn: {account: Liabilities:CreditCard:ExampleCard, date: "2026-03-05", amount: "-1200.00", match: '(?i)EXAMPLE HOSP'}
+    documents: [bill-hospital-2026-02]
+    basis: evidence
+
+  # Income tax by tax year: accrue evenly over the year, estimated payments and the balance due settle it.
+  - id: fedtax-2025
+    kind: allocate
+    description: 2025 federal income tax (total tax minus withholding)
+    counterparty: IRS
+    account: Expenses:Taxes:Federal
+    balance: Liabilities:Accrued:Taxes:Federal-2025
+    amount: "12000.00"
+    start: "2025-01-01"
+    end: "2025-12-31"
+    prior_settled: "6000.00"            # estimates paid before books_start
+    settlements:
+      - txn: {account: checking, date: "2026-01-15", amount: "-3000.00", match: '(?i)IRS USATAXPYMT'}
+      - txn: {account: checking, date: "2026-04-15", amount: "-3050.00", match: '(?i)IRS USATAXPYMT'}
+        splits:
+          - {account: Expenses:Taxes:Penalties, amount: "50.00", memo: underpayment penalty}
+    documents: [tax-return-2025]
+    basis: evidence
+
+  # Prepaid: annual premium paid up front, expensed monthly.
+  - id: home-insurance-2026
+    kind: allocate
+    description: Homeowners premium, 12-month term
+    account: Expenses:Insurance:Home
+    balance: Assets:Prepaid:Insurance
+    amount: "600.00"
+    start: "2026-04-01"
+    end: "2027-03-31"
+    settlements:
+      - txn: {account: Liabilities:Mortgage:ExampleBank, date: "2026-03-20", amount: "-600.00", match: '(?i)HAZARD INS'}
+    basis: inferred
+
+  # Mortgage: split each payment into interest and principal at a known rate and P&I amount.
+  - id: mortgage-interest
+    kind: loan
+    account: Expenses:Housing:MortgageInterest
+    balance: Liabilities:Mortgage:ExampleBank
+    rate_pct: "4.25"
+    pi_payment: "1500.00"
+    settlements:
+      - txn: {account: Liabilities:Mortgage:ExampleBank, match: '^Payment', all: true}
+    # Optional escrow: payments from escrow_from carry escrow = payment - pi_payment (to the escrow
+    # account; principal = pi_payment - interest). Rows the lender paid out of escrow (county tax,
+    # insurance, escrow interest) move off the loan into escrow. optional: none yet is fine.
+    escrow: Assets:Escrow
+    escrow_from: "2026-01-01"
+    escrow_disbursements:
+      - {account: Liabilities:Mortgage:ExampleBank, from: "2026-01-01", match: '(?i)COUNTY TAX|INSURANCE|INTEREST ON ESCROW', all: true, optional: true}
+    basis: evidence
+
+  # Straight-line depreciation of an owned asset: an allocate into a contra-asset.
+  - id: car-depreciation
+    kind: allocate
+    description: Straight-line depreciation, 15% a year of 20,000
+    account: Expenses:Depreciation:Vehicles
+    balance: Assets:Vehicles:AccumulatedDepreciation:ExampleCar
+    amount: "20000.00"
+    start: "2026-01-01"
+    end: "2032-08-31"                   # 80 months -> 250.00 a month
+    basis: estimate
+
+  # Private loan used to buy land: non-cash journal plus monthly accrued interest.
+  - id: land-purchase
+    kind: journal
+    date: "2026-02-01"
+    description: Land bought with funds lent directly by the seller
+    lines:
+      - {account: Assets:RealEstate:ExampleLot, amount: "50000.00"}
+      - {account: Liabilities:Loan:PrivateLender, amount: "-50000.00"}
+  - id: land-loan-interest
+    kind: interest
+    account: Expenses:Interest:PrivateMortgage
+    balance: Liabilities:Accrued:Interest:PrivateLender
+    principal: "50000.00"
+    rate_pct: "5.0"
+    start: "2026-02-01"
+    basis: evidence

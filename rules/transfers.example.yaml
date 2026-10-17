@@ -1,0 +1,51 @@
+# Internal-transfer matching: GENERIC STARTER SET (placeholder institutions).
+# Copy to $FINANCE_DATA/config/transfers.personal.yaml and edit; when that file exists it REPLACES this
+# example. Without it the code falls back to this example.
+# See docs/schema.md#transfers for the full rule.
+#
+# 1. Each posted connector row is tested against `hints` in order (regex over
+#    "name | merchant | description"; optional on_kind / on_institution filters).
+#    The first matching hint gives the row a TARGET SET of candidate accounts:
+#      mask_group: N     -> accounts whose mask equals regex group N
+#      to_key: k         -> the account with logical key k (account map or coa.yaml)
+#      to_institution: r -> every mapped account whose institution matches regex r
+#      to_class: c       -> every mapped account of connector class c (cash|liability|any)
+#    The row's own account is removed; an empty set means the hint is ignored.
+# 2. Candidate pool = hinted rows whose targets include a connector account, plus un-hinted
+#    rows whose Plaid primary category is TRANSFER_IN / TRANSFER_OUT / LOAN_PAYMENTS.
+# 3. Pair = equal and opposite amounts (to the cent) in two different accounts, each side's
+#    account in the other side's target set (if hinted), dated within window_days_hinted
+#    (either side hinted) or window_days_generic (neither hinted).
+#    `funding: true` hints also accept a SAME-sign pair: the bank row funds a payment made
+#    from the target wallet (a P2P wallet pays a merchant, bank pulls the same amount).
+# 4. Candidates are ranked (both hinted < one hinted < generic, then smallest date gap, then
+#    date, then ids) and accepted greedily; each row is used at most once.
+# 5. Same-day pairs -> one two-leg entry. Different days -> one entry per leg against
+#    Assets:Transfers:InTransit, linked by link_id (InTransit nets to zero once both post).
+# 6. Hinted rows left unpaired: if the target is a single internal (non-connector) account
+#    such as a crypto exchange -> booked against it; otherwise -> Assets:Transfers:Unmatched.
+#    Un-hinted TRANSFER_* rows that are not paired and not caught by a category rule also go
+#    to Unmatched. `finance check` lists everything in Unmatched.
+
+window_days_hinted: 10
+window_days_generic: 4
+in_transit_account: Assets:Transfers:InTransit
+unmatched_account: Assets:Transfers:Unmatched
+
+hints:
+  # Online transfers that name the other account's last 4 digits (mask_group picks the digits)
+  - {name: xfer-mask, match: '(?i)XFER (?:TO|FROM) (?:SAV|DDA) \*+(\d{4})', mask_group: 1}
+  - {name: transfer-colon-mask, match: '(?i)TRANSFER (?:TO|FROM) : \*+(\d{4})', mask_group: 1}
+  # Savings vaults / sub-accounts at the same bank (to_key = key in your account map or coa)
+  - {name: example-vault, match: '(?i)emergency fund', to_key: example_savings}
+  - {name: example-roundup, match: '(?i)ROUNDUP', on_institution: ExampleBank, to_institution: ExampleBank}
+  # Credit card and loan payments
+  - {name: card-payment-bank, match: '(?i)EXAMPLECARD EPAYMENT', to_key: example_card}
+  - {name: card-payment-card, match: '(?i)PAYMENT - THANK YOU', on_kind: liability, to_class: cash}
+  - {name: mortgage-payment-bank, match: '(?i)EXAMPLE MORTGAGE', on_kind: cash, to_key: example_mortgage}
+  - {name: mortgage-payment-loan, match: '^Payment$', on_institution: ExampleMortgage, to_class: cash}
+  # Peer-to-peer wallet: bank rows fund wallet payments (same sign) or receive cash-outs (opposite sign)
+  - {name: wallet-bank, match: '(?i)^examplepay\b', on_institution: 'ExampleBank', to_key: example_wallet, funding: true}
+  - {name: wallet-cashout, match: '(?i)Standard transfer', on_institution: ExamplePay, to_class: cash}
+  # Accounts outside the connector (booked one-sided to the internal account)
+  - {name: exchange, match: '(?i)example exchange', on_kind: cash, to_key: example_exchange}

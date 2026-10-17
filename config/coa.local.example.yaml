@@ -1,0 +1,6 @@
+# TEMPLATE: personal chart-of-accounts additions. Copy to $FINANCE_DATA/config/coa.local.yaml.
+# Same format as config/coa.yaml. Accounts are appended to the repo chart (a name that is already
+# listed there is replaced); `defaults` override the repo defaults.
+accounts:
+  - {name: Income:SideBusiness, report_line: Business income}
+  - {name: Assets:Receivable:Friend, description: Money a friend owes me}

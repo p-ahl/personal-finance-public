@@ -1,0 +1,108 @@
+# Categorization rules: GENERIC STARTER SET (placeholder merchants).
+# Copy to $FINANCE_DATA/config/rules.personal.yaml and edit; when that file exists it REPLACES this
+# example (a complete file, same format). Without it the code falls back to this example. Evaluated top to bottom; first match wins.
+# Person-specific rules go in the LOCAL overlay (finance-data/config/rules.local.yaml),
+# which is evaluated BEFORE these.
+#
+# match       regex over "name | merchant | description" (use (?i) for case-insensitive)
+# plaid       regex over the Plaid detailed category
+# direction   in | out   (money into / out of the connector account)
+# kind        cash | liability
+# institution regex over the source account's institution short name
+# account     target account; {institution} expands to the source institution
+# dimensions  [kind:code, ...] tags on the categorized line (e.g. project:<code>, trip:<code>)
+#
+# Rows not matched by a rule fall back to `plaid_fallback` (detailed, then primary category);
+# lines record category_source = rule:<origin>:<name> | plaid:<category> | uncategorized.
+
+rules:
+  # ---------- income ----------
+  - {name: payroll-plaid, plaid: '^INCOME_SALARY$', direction: in, account: Income:Salary}
+  - {name: payroll-employer, match: '(?i)\bACME PAYROLL\b', direction: in, account: Income:Salary}
+  - {name: interest, match: '(?i)interest (earned|payment)|^INTEREST PAYMENT', direction: in, account: 'Income:Interest:{institution}'}
+  - {name: mobile-deposit, match: '(?i)MOBILE DEPOSIT', direction: in, kind: cash, account: Income:Uncategorized}
+
+  # ---------- taxes ----------
+  - {name: irs, match: '(?i)internal revenue service|\bIRS\b|IRS USATAXPYMT', account: Expenses:Taxes:Federal}
+  - {name: state-tax, match: '(?i)STATE TAX|TAX PAYMNT', account: Expenses:Taxes:State}
+  - {name: property-tax, match: '(?i)county tax', account: Expenses:Taxes:Property}
+
+  # ---------- housing / utilities ----------
+  - {name: furnishings, match: '(?i)example hardware|example furniture', account: Expenses:Housing:Furnishings}
+  - {name: energy, match: '(?i)example power|example electric', account: Expenses:Utilities:Energy}
+  - {name: internet, match: '(?i)example internet|example cable', account: Expenses:Utilities:Internet}
+  - {name: phone, match: '(?i)example mobile|example wireless', account: Expenses:Utilities:Phone}
+  - {name: water, match: '(?i)water (dept|district|utility)', account: Expenses:Utilities:Water}
+
+  # ---------- food / transport ----------
+  - {name: groceries, match: '(?i)example market|example grocer', account: Expenses:Food:Groceries}
+  - {name: restaurants, match: '(?i)example cafe|example diner|example pizza', account: Expenses:Food:Restaurants}
+  - {name: fuel, match: '(?i)example gas|example fuel', account: Expenses:Transport:Fuel}
+  - {name: parking, match: '(?i)parking', account: Expenses:Transport:Parking}
+
+  # ---------- software / subscriptions / shopping ----------
+  - {name: software, match: '(?i)example cloud|example code host', account: Expenses:Software}
+  - {name: subscriptions, match: '(?i)example streaming|example music', account: Expenses:Subscriptions}
+  - {name: shopping, match: '(?i)example store|example marketplace', account: Expenses:Shopping}
+
+  # ---------- insurance / healthcare / charity / travel ----------
+  - {name: insurance, match: '(?i)example insurance', account: Expenses:Insurance}
+  - {name: healthcare, match: '(?i)pharmacy|dental|medical', account: Expenses:Healthcare}
+  - {name: charity, match: '(?i)example charity|example foundation', account: Expenses:Charity}
+  - {name: travel, match: '(?i)example airline|example hotel', account: Expenses:Travel}
+
+  # ---------- fees ----------
+  - {name: fx-fee, match: '(?i)foreign trans(action)? fee', account: Expenses:Fees:Bank}
+  - {name: return-fee, match: '(?i)RETURN PAYMENT FEE|LATE FEE|OVERDRAFT', account: Expenses:Fees:Bank}
+  - {name: card-annual-fee, match: '(?i)RENEWAL MEMBERSHIP FEE|ANNUAL FEE', account: Expenses:Fees:CardAnnual}
+  - {name: wire-fee, match: '(?i)WIRE (OUT )?FEE', account: Expenses:Fees:Bank}
+
+# Plaid personal-finance categories (detailed, then primary) -> account, for rows no rule catches.
+plaid_fallback:
+  INCOME_SALARY: Income:Salary
+  INCOME_INTEREST_EARNED: Income:Interest
+  INCOME_DIVIDENDS: Income:Investments:Dividends
+  INCOME_OTHER: Income:Uncategorized
+  INCOME_CONTRACTOR: Income:Uncategorized
+  GOVERNMENT_AND_NON_PROFIT_TAX_PAYMENT: Expenses:Taxes
+  GOVERNMENT_AND_NON_PROFIT_DONATIONS: Expenses:Charity
+  GOVERNMENT_AND_NON_PROFIT_GOVERNMENT_DEPARTMENTS_AND_AGENCIES: Expenses:Misc
+  FOOD_AND_DRINK_GROCERIES: Expenses:Food:Groceries
+  FOOD_AND_DRINK: Expenses:Food:Restaurants
+  MEDICAL: Expenses:Healthcare
+  GENERAL_MERCHANDISE_CLOTHING_AND_ACCESSORIES: Expenses:Shopping:Clothing
+  GENERAL_MERCHANDISE_ELECTRONICS: Expenses:Shopping:Electronics
+  GENERAL_MERCHANDISE_BOOKSTORES_AND_NEWSSTANDS: Expenses:Entertainment:Books
+  GENERAL_MERCHANDISE_GIFTS_AND_NOVELTIES: Expenses:Gifts
+  GENERAL_MERCHANDISE_CONVENIENCE_STORES: Expenses:Food:Restaurants
+  GENERAL_MERCHANDISE_SUPERSTORES: Expenses:Shopping
+  GENERAL_MERCHANDISE: Expenses:Shopping
+  HOME_IMPROVEMENT_FURNITURE: Expenses:Housing:Furnishings
+  HOME_IMPROVEMENT: Expenses:Housing:Maintenance
+  RENT_AND_UTILITIES_RENT: Expenses:Housing:Rent
+  RENT_AND_UTILITIES_GAS_AND_ELECTRICITY: Expenses:Utilities:Energy
+  RENT_AND_UTILITIES_INTERNET_AND_CABLE: Expenses:Utilities:Internet
+  RENT_AND_UTILITIES_TELEPHONE: Expenses:Utilities:Phone
+  RENT_AND_UTILITIES_WATER: Expenses:Utilities:Water
+  RENT_AND_UTILITIES: Expenses:Utilities
+  GENERAL_SERVICES_INSURANCE: Expenses:Insurance
+  GENERAL_SERVICES_AUTOMOTIVE: Expenses:Transport:Auto
+  GENERAL_SERVICES_EDUCATION: Expenses:Education
+  GENERAL_SERVICES_ACCOUNTING_AND_FINANCIAL_PLANNING: Expenses:Subscriptions
+  GENERAL_SERVICES_POSTAGE_AND_SHIPPING: Expenses:Misc
+  GENERAL_SERVICES: Expenses:Misc
+  TRANSPORTATION_GAS: Expenses:Transport:Fuel
+  TRANSPORTATION_PARKING: Expenses:Transport:Parking
+  TRANSPORTATION_PUBLIC_TRANSIT: Expenses:Transport:Transit
+  TRANSPORTATION: Expenses:Transport
+  TRAVEL: Expenses:Travel
+  ENTERTAINMENT_MUSIC_AND_AUDIO: Expenses:Subscriptions
+  ENTERTAINMENT_TV_AND_MOVIES: Expenses:Entertainment
+  ENTERTAINMENT: Expenses:Entertainment
+  PERSONAL_CARE: Expenses:PersonalCare
+  BANK_FEES: Expenses:Fees:Bank
+
+fallback:
+  in: Income:Uncategorized
+  out: Expenses:Uncategorized
+  transfer: Assets:Transfers:Unmatched

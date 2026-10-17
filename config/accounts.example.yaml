@@ -1,0 +1,27 @@
+# TEMPLATE for the connector account map. Copy to $FINANCE_DATA/config/accounts.yaml (outside the
+# repo) and fill in real connector ids. The real file is data and is never committed.
+#
+# connector_id : account id from the Finance connector (accounts.json)
+# key          : logical id referenced by rules/transfers.personal.yaml (to_key)
+# name         : ledger account path; put the last 4 digits of the account number in the real file
+# tracking     : connector  - balance derived from the transaction feed
+#                holdings   - positions from holdings.csv (opening at cost + mark-to-market)
+#                valuation  - no transaction feed; opening entry only (valuation_only)
+books_start: "2025-10-06"   # opening date for accounts with no activity
+
+institutions:   # short names are used in account paths and {institution} rule templates
+  - {name: ExampleBank,     connector_id: <connection-id>, display: Example Bank}
+  - {name: ExampleCard,     connector_id: <connection-id>, display: Example Card Co}
+  - {name: ExampleMortgage, connector_id: <connection-id>, display: Example Mortgage}
+  - {name: ExamplePay,      connector_id: <connection-id>, display: ExamplePay wallet}
+  - {name: ExampleBroker,   connector_id: <connection-id>, display: Example Brokerage}
+
+accounts:
+  - {connector_id: <id>, key: example_checking,  name: "Assets:Bank:ExampleBank:Checking-XXXX", institution: ExampleBank, tracking: connector}
+  - {connector_id: <id>, key: example_savings,   name: "Assets:Bank:ExampleBank:Savings-XXXX", institution: ExampleBank, tracking: connector}
+  # pending_account: wallet payments are funded by a bank/card debit that posts days later
+  - {connector_id: <id>, key: example_wallet,    name: "Assets:Bank:ExamplePay", institution: ExamplePay, tracking: connector, pending_account: "Liabilities:Pending:Wallet-Funding"}
+  - {connector_id: <id>, key: example_brokerage, name: "Assets:Investments:ExampleBroker:Brokerage-XXXX", institution: ExampleBroker, tracking: holdings}
+  - {connector_id: <id>, key: example_ira,       name: "Assets:Investments:ExampleBroker:IRA-XXXX", institution: ExampleBroker, tracking: valuation, valuation_only: true}
+  - {connector_id: <id>, key: example_mortgage,  name: "Liabilities:Mortgage:ExampleMortgage-XXXX", institution: ExampleMortgage, tracking: connector}
+  - {connector_id: <id>, key: example_card,      name: "Liabilities:CreditCard:ExampleCard:Rewards-XXXX", institution: ExampleCard, tracking: connector}

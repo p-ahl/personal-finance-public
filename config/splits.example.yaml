@@ -1,0 +1,30 @@
+# Item-level splits (SYNTHETIC example). Copy to "$FINANCE_DATA/config/splits.local.yaml".
+# The real file lives data-side and is never committed: it names items and amounts.
+#
+# Each entry replaces the single categorized counter-leg of ONE connector transaction with
+# several postings (e.g. an online-store charge itemized from its order email). The card/bank
+# leg is untouched, so connector balances still reconcile.
+#
+#   txn:    connector transaction id (the journal external id without "plaid:"; prefix accepted)
+#   date:   optional; must equal the transaction date when set (catches stale ids)
+#   source: short provenance tag -> category_source "split:<source>" on every line
+#   note:   free text (order number, evidence pointer); not posted
+#   lines:  account + amount (+ memo, dimensions). Amounts are debit-positive like the
+#           counter-leg they replace: a purchase is positive, a refund negative. They must sum
+#           to the transaction exactly, to the cent (allocate tax/shipping/discounts yourself).
+#
+# Splits apply only to rows that end up categorized (not transfers or accrual settlements). A
+# split that matches no categorized row fails the build, so stale ids surface immediately.
+splits:
+  - txn: plaid:txn-0001
+    date: "2026-01-04"
+    source: order-email
+    note: "order 000-0000000-0000000 (email msg id abc123)"
+    lines:
+      - {account: Expenses:Food:Groceries, amount: "42.17", memo: Coffee beans 2 lb}
+      - {account: Expenses:Healthcare, amount: "8.04", memo: Adhesive bandages, dimensions: ["hsa:eligible"]}
+      - {account: Expenses:Housing:Supplies, amount: "15.29", memo: Laundry detergent}
+  - txn: plaid:txn-0002          # a refund: negative amounts
+    source: order-email
+    lines:
+      - {account: Expenses:Shopping:Electronics, amount: "-24.99", memo: "Return: USB-C cable"}

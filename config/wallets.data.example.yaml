@@ -1,0 +1,41 @@
+# Template for $FINANCE_DATA/config/wallets.yaml (LOCAL ONLY, chmod 600, never commit): the
+# self-custody wallets read by `finance download wallets` / `finance import wallets` and
+# scripts/wallet_events.py. Public addresses and extended PUBLIC keys only (watch-only; nothing
+# here can spend). Addresses and keys are copied into the local DB (wallet_identifiers) and
+# never appear in git, statements or logs; reports show wallet names only.
+# (config/wallets.example.yaml is the older template of the legacy `finance download kaspa`.)
+wallets:
+  - name: Hardware                     # wallet name shown in the books and statements
+    account: Assets:Crypto:SelfCustody:Hardware
+    per_coin: true                     # one sub-account per coin: ...:Hardware:KAS, ...:Hardware:BTC
+    chains:
+      - {chain: kaspa,    address: "kaspa:REPLACE_ME"}
+      - {chain: bitcoin,  address: "bc1REPLACE_ME"}
+      - {chain: litecoin, address: "ltc1REPLACE_ME"}
+      - {chain: solana,   address: "REPLACE_ME"}      # SOL + SPL tokens (USDC, USDT, PYUSD, others)
+    note: optional free text (kept in the local DB)
+  - name: MobileKaspa
+    account: Assets:Crypto:SelfCustody:MobileKaspa
+    chains:
+      - chain: kaspa
+        kpub: "kpubREPLACE_ME"           # account-level extended public key
+        path: "m/44'/111111'/0'"         # receive /0/i and change /1/i are derived
+        gap_limit: 20                    # scan until this many consecutive unused addresses per chain
+  - name: MoneroApp
+    account: Assets:Crypto:SelfCustody:MoneroApp
+    chains:
+      - {chain: monero, file: monero-export.csv}   # wallet app CSV export saved in the pull folder (UTC)
+
+# Third-party public addresses seen on-chain (evidence labels for scripts/wallet_events.py).
+# "coinbase" marks Coinbase hot wallets: sends from them that are not in the staged Coinbase
+# history are booked at market value on receipt (estimated cost).
+labels:
+  "REPLACE_ME": swap service hot wallet
+  "REPLACE_ME_2": coinbase
+
+# Pass-through windows (UTC): every wallet movement inside is someone else's money crossing a
+# wallet; excluded from the books.
+passthrough:
+  - from: "2025-01-01T00:00:00Z"
+    to: "2025-01-01T01:00:00Z"
+    note: "whose money it was and why it crossed the wallet"

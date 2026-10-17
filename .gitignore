@@ -1,0 +1,49 @@
+# Secrets / local wallets
+config/wallets.yaml
+
+# Binaries
+/bin/
+/finance
+/cmd/finance/finance
+
+# Go
+*.exe
+*.test
+*.out
+vendor/
+
+# Imports (raw downloads; keep structure)
+imports/**/*.json
+!imports/.gitkeep
+
+# Documents (personal PDFs etc.)
+documents/*
+!documents/.gitkeep
+
+# OS / editor
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+
+# fnox / env
+.env
+.env.*
+!.env.example
+
+# Browser session state, local data, exports, databases, backups (never commit)
+*.auth.json
+sessions/
+finance-data/
+exports/
+raw/
+*.db
+*.db-shm
+*.db-wal
+*.bak
+backups/
+
+# Python
+__pycache__/
+*.pyc

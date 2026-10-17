@@ -1,0 +1,13 @@
+# Copy to wallets.yaml (gitignored) and fill in real addresses.
+# Phase 1: only explicit addresses are fetched. kpub derivation is not implemented yet.
+
+kaspa:
+  wallets:
+    - name: Tangem
+      address: kaspa:qqexampleaddresshere
+      # Optional future: derive receive addresses from xpub/kpub
+      # kpub: kpub...
+    - name: Kaspium
+      # address: kaspa:...
+      kpub: kpubREPLACE_ME
+      note: "Phase 1 skips kpub-only wallets; add explicit address(es) to download."

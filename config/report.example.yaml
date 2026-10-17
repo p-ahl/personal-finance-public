@@ -1,0 +1,63 @@
+# TEMPLATE for the report labels used by scripts/weekly.py, charts.py and statements.py.
+# Copy to $FINANCE_DATA/config/report.local.yaml (outside the repo) and edit. Every key is optional;
+# omitted keys fall back to the generic defaults in scripts/reportcfg.py.
+
+household: The Example Household          # page subtitle
+goal: 20000                               # cash goal in whole dollars (weekly report + charts)
+
+# Accounts shown but NOT counted toward the goal (e.g. a holiday fund), and an optional receivable for it
+trips_accounts: ["Assets:Bank:ExampleBank:Savings-0000"]
+trips_receivable_account: "Assets:Receivable:Employer"
+trips_fund_suffix: " (holiday fund)"
+trips_receivable_label: "Holiday fund: pay held"
+trips_chart_label: "Holiday fund (savings account)"
+
+tax_jurisdictions: [Federal, State]       # Liabilities:Accrued:Taxes:<Jurisdiction>-<year>
+later_account_substrings: ["Contractor"]  # payable accounts listed as "owed later", not in the 2-week window
+brokerage_name: Example Brokerage
+plan_items_phrase: "cash-plan dates"
+later_note: " (Property tax is paid from escrow in November.)"
+
+# Narrative notes. {placeholders} are filled in by the report; leave a note "" to omit it.
+notes:
+  crypto_first_valuation: ""
+  inv_real: "Shares sold in the example brokerage account ({inv_real} gain)."
+  crypto_real: ""
+  no_income: "No pay or distribution deposits were booked this week."
+  trips_held: "† Holiday money, not counted: savings {trips_cash} plus held pay {trips_receivable} (not yet deposited)."
+  trips_deposit: "Deposit the remaining held pay ({held}) into the holiday account."
+  travel_skew: "Average is skewed by a prepaid trip."
+
+# Open receivables by balance account (html; {amount} is filled in)
+receivable_notes:
+  "Assets:Receivable:Friend": "A friend owes {amount} (half of a shared cost)."
+
+# charts.py: cash stacks (key, label, account prefixes, colour), a related-party loan group,
+# income series (matched by account prefix, first match wins) and notes on big expense months
+cash_series:
+  - {key: checking, label: Example checking, prefixes: ["Assets:Bank:ExampleBank:Checking"], color: "#4e79a7"}
+  - {key: savings, label: Example savings, prefixes: ["Assets:Bank:ExampleBank:Savings"], color: "#59a14f"}
+loan_group:
+  label: Family loan
+  account_prefixes: ["Liabilities:Loan:Family", "Liabilities:Accrued:Interest:Family"]
+income_series:
+  - {key: salary, label: Salary (me), prefix: "Income:Salary:Me"}
+  - {key: business, label: Business distributions, prefix: "Income:SideBusiness"}
+  - {key: partner, label: Salary (partner), prefix: "Income:Salary:Partner"}
+income_notes:
+  - {pattern: "%hospital%", label: Hospital bills}
+real_estate_note: "Real estate is the home at cost plus land and construction costs so far; vehicles are net of depreciation."
+
+# statements.py cash-flow highlights: lower-case substrings of counterparty / description / account
+highlights:
+  tax_year_labels:
+    - {acct: "-2025", desc: "2025", label: "2025 [[income_tax|income taxes]]"}
+  land: {accts: [], cps: ["example seller"], label: "[[land_payments|Land purchase payments]]"}
+  medical: {cps: ["example hospital"], desc: [], label: "Medical bills"}
+  sale_proceeds:
+    cps: ["example transfer agent"]
+    desc: []
+    accts: []
+    brokerage_desc: ["sale"]          # matched when the counterparty contains brokerage_name
+    label: "[[inv_proceeds|Proceeds from sales of investments]] (example shares)"
+  business_account_token: "SideBusiness"

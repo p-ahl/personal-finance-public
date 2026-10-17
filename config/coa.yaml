@@ -1,0 +1,146 @@
+# Chart of accounts template (no balances, no account numbers).
+# Account names are colon-separated paths. Attributes inherit from the nearest listed ancestor,
+# then from `defaults` (keyed by top-level segment). Parents that are not listed and carry no
+# lines are created as placeholders (posting to them is rejected by a trigger).
+#
+# report_line : line on the balance sheet / income statement
+# cash_flow   : cash | operating | investing | financing | opening | unclassified
+#               `cash` marks the accounts whose movements ARE cash flow; the others classify
+#               the counterpart leg of a cash movement (direct method).
+# key         : logical id referenced by rules/transfers.example.yaml hints
+# assume_end_balance : back into an opening entry so this (non-connector) account ends at the
+#               given balance (used for swept SoFi vaults that no longer exist in the feed).
+# Personal additions go in the LOCAL overlay $FINANCE_DATA/config/coa.local.yaml (same format; merged
+# onto this file, see config/coa.local.example.yaml).
+# Connector-backed accounts (bank/card/brokerage, with masks) live in the LOCAL account map,
+# not here: see config/accounts.example.yaml.
+
+defaults:
+  Assets:      {report_line: Other assets, cash_flow: investing}
+  Liabilities: {report_line: Other liabilities, cash_flow: financing}
+  Equity:      {report_line: Equity, cash_flow: opening}
+  Income:      {report_line: Other income, cash_flow: operating}
+  Expenses:    {report_line: Other expenses, cash_flow: operating}
+
+accounts:
+  # ---------- Assets ----------
+  - {name: Assets:Bank, report_line: Cash and equivalents, cash_flow: cash}
+  - {name: Assets:Cash, report_line: Cash and equivalents, cash_flow: cash, description: Physical cash}
+  - {name: Assets:Investments, report_line: Investments, cash_flow: investing}
+  - {name: Assets:Investments:Private, description: "Off-connector holdings (Reg A / crowdfund / private shares held in book entry at a transfer agent), carried at evidenced cost; one sub-account per issuer, opened against Equity:Opening-Balances and relieved at sale"}
+  - {name: Assets:Crypto, report_line: Crypto, cash_flow: investing}
+  - {name: Assets:Crypto:Exchange:Kraken, key: kraken, tracking: holdings, description: "Kraken account rebuilt from the Kraken API (finance download/import kraken): USD cash + crypto positions at FIFO cost, marked to market at the pull's ticker; balance assertion source = kraken"}
+  - {name: Assets:Crypto:Exchange:Coinbase, key: coinbase, tracking: holdings, description: "Coinbase account rebuilt from a saved Coinbase pull (finance import coinbase: MCP connector balances/fills/prices + events.csv from Coinbase emails): USD cash + crypto at FIFO cost, marked to market at the pull's best bid/ask mid; balance assertion source = coinbase"}
+  - {name: Assets:Crypto:Exchange:Strike, key: strike, tracking: none, description: "Not in the connector; balance = net contributions only"}
+  - {name: Assets:Crypto:SelfCustody, tracking: holdings, description: "Self-custody wallets (finance download/import wallets): one sub-account per wallet (per coin where the wallet holds several), names from the local wallets config; quantities from on-chain balances (balance assertion source = wallets), lots at FIFO cost carried from exchange withdrawals and inferred swaps, marked to market at the pull's prices. Addresses/keys only in the local DB (wallet_identifiers) and config"}
+  - {name: Assets:Crypto:SelfCustody:Unassigned, key: crypto_selfcustody, tracking: derived, description: "Clearing: exchange withdrawals not (yet) traced to a wallet and unmatched wallet items, at cost; the wallet at-cost adjustment moves it into the wallet holdings (should be 0 after each wallet import)"}
+  - {name: Assets:Crypto:SoFiCrypto, key: sofi_crypto, tracking: none, description: "SoFi crypto; not in the connector; net contributions only"}
+  - {name: Assets:RealEstate, report_line: Real estate, cash_flow: investing}
+  - {name: Assets:RealEstate:Residence, description: "Primary residence at cost basis (purchase price + capitalizable closing costs); not marked to market"}
+  - {name: Assets:RealEstate:Land, description: Building lot (land purchase payments at cost)}
+  - {name: Assets:RealEstate:Construction, description: "Capitalized construction costs. For a build, use Assets:RealEstate:<Project>:Land and Assets:RealEstate:<Project>:CIP:<CostCode> (local config) and tag lines project:<code> + cost:<code> (land, design, engineering, permits_fees, utilities, sitework, construction, financing) for 'finance report project'"}
+  - {name: Assets:Vehicles, report_line: Vehicles, cash_flow: investing, description: "Owned vehicles (off-connector), one sub-account per vehicle in local config; carried at an evidenced cost or owner value against Equity:Opening-Balances when held before books_start; depreciated straight-line by local allocate accruals into Assets:Vehicles:AccumulatedDepreciation:<vehicle>; not marked to market unless revalued with evidence"}
+  - {name: Assets:Vehicles:AccumulatedDepreciation, description: "Contra-asset: accumulated straight-line depreciation, one sub-account per vehicle (credit balance)"}
+  - {name: Assets:Receivable, report_line: Receivables, cash_flow: operating}
+  - {name: Assets:Prepaid, report_line: Prepaid expenses, cash_flow: operating, description: "Paid before the period it covers; amortized monthly (accruals.yaml kind: allocate)"}
+  - {name: Assets:Prepaid:Insurance}
+  - {name: Assets:Prepaid:Travel, description: "Trips paid ahead (flights, lodging deposits); released to Expenses:Travel when the trip starts"}
+  - {name: Assets:Prepaid:Taxes, description: Estimated tax paid ahead of the tax-year recognition}
+  - {name: Assets:Escrow, report_line: Escrow, cash_flow: operating, description: "Lender-held mortgage escrow: the part of each payment above P&I, less county tax / insurance paid from escrow (loan accrual escrow fields); the balance before escrow tracking started is not in the books unless a statement gives it"}
+  - {name: Assets:Transfers, report_line: Transfers in transit, cash_flow: unclassified}
+  - {name: Assets:Transfers:InTransit, description: Clearing for transfers whose legs post on different days}
+  - {name: Assets:Transfers:Unmatched, report_line: Unmatched transfers, description: Transfer-like rows with no counterpart found; review with `finance check`}
+
+  # ---------- Liabilities ----------
+  - {name: Liabilities:CreditCard, report_line: Credit cards, cash_flow: operating}
+  - {name: Liabilities:Mortgage, report_line: Mortgages, cash_flow: financing}
+  - {name: Liabilities:Loan, report_line: Loans, cash_flow: financing, description: "Private / family loans not in the connector; one sub-account per lender, named in local config"}
+  - {name: Liabilities:Vendor, report_line: Payables, cash_flow: operating}
+  - {name: Liabilities:Payable, report_line: Payables, cash_flow: operating, description: "Billed or incurred, not yet paid (accruals.yaml kind: payable); one sub-account per provider"}
+  - {name: Liabilities:PassThrough, report_line: Pass-through owed to others, cash_flow: operating, description: "Money received on behalf of someone else (e.g. their share of a distribution) and owed onward; booked as a payable against the income line, settled by the onward payment"}
+  - {name: Liabilities:Accrued, report_line: Accrued liabilities, cash_flow: operating, description: "Expense recognized before payment (taxes by tax year, property tax, interest)"}
+  - {name: Liabilities:Accrued:Taxes}
+  - {name: Liabilities:Accrued:Interest}
+  - {name: Liabilities:Pending, report_line: Pending funding, cash_flow: operating, description: "Activity a connector account's reported balance already includes but that has not posted in the feed yet (e.g. Venmo payments whose bank/card funding debit lags): reported balance minus pinned opening and posted activity, recomputed every run (entry pending:<connector account id>); clears to zero when the funding row posts. Mapping key pending_account names the sub-account; Liabilities:Pending:Unposted (the default) means unexplained and is flagged for review"}
+  - {name: Liabilities:Pending:Unposted, description: "Default pending account for an unexplained gap between a reported balance and pinned opening + history (REVIEW)"}
+
+  # ---------- Equity ----------
+  - {name: Equity:Opening-Balances, report_line: Opening balances, cash_flow: opening}
+
+  # ---------- Income ----------
+  - {name: Income:Salary, report_line: Salary}
+  - {name: Income:SideProjects, report_line: Business income}
+  - {name: Income:Interest, report_line: Interest}
+  - {name: Income:Investments, report_line: Investment income, cash_flow: investing}
+  - {name: Income:Investments:Dividends, report_line: Investment income, cash_flow: operating}
+  - {name: Income:Investments:Realized-Gains, report_line: Realized gains, description: "Sale proceeds minus book basis (assets held off-connector carry book basis 0 until evidenced)"}
+  - {name: Income:Investments:Realized-Gains:LongTerm, description: "Held more than one year (Form 8949 Part II)"}
+  - {name: Income:Investments:Realized-Gains:ShortTerm, description: "Held one year or less (Form 8949 Part I)"}
+  - {name: Income:Investments:Unrealized-Gains, report_line: Unrealized gains, description: Mark-to-market of holdings (non-cash)}
+  - {name: Income:Crypto, report_line: Investment income}
+  - {name: Income:Crypto:Staking, description: "Exchange staking/earn rewards at the daily USD close on receipt"}
+  - {name: Income:Retirement, report_line: Retirement distributions, description: "Taxable distributions from employer plans and IRAs (Form 1099-R), booked gross; tax withheld goes to the tax accounts, not netted"}
+  - {name: Income:Refunds, report_line: Other income}
+  - {name: Income:Gifts, report_line: Other income}
+  - {name: Income:Reimbursements, report_line: Other income}
+  - {name: Income:Uncategorized, report_line: Uncategorized income}
+
+  # ---------- Expenses ----------
+  - {name: Expenses:Housing, report_line: Housing}
+  - {name: Expenses:Housing:Rent}
+  - {name: Expenses:Housing:Design}
+  - {name: Expenses:Housing:Construction}
+  - {name: Expenses:Housing:Land}
+  - {name: Expenses:Housing:Furnishings}
+  - {name: Expenses:Housing:HOA, description: Homeowners association dues}
+  - {name: Expenses:Housing:Maintenance}
+  - {name: Expenses:Housing:Supplies, description: "Household consumables: cleaning, laundry, paper goods, batteries"}
+  - {name: Expenses:Housing:MortgageInterest}
+  - {name: Expenses:Food, report_line: Food}
+  - {name: Expenses:Food:Groceries}
+  - {name: Expenses:Food:Restaurants}
+  - {name: Expenses:Transport, report_line: Transport}
+  - {name: Expenses:Transport:Fuel}
+  - {name: Expenses:Transport:Auto}
+  - {name: Expenses:Transport:Parking}
+  - {name: Expenses:Transport:Transit}
+  - {name: Expenses:Transport:Registration}
+  - {name: Expenses:Depreciation, report_line: Other expenses, description: "Non-cash depreciation of owned assets"}
+  - {name: Expenses:Depreciation:Vehicles, report_line: Transport, description: "Straight-line vehicle depreciation (non-cash); shown under Transportation"}
+  - {name: Expenses:Utilities, report_line: Utilities}
+  - {name: Expenses:Utilities:Energy}
+  - {name: Expenses:Utilities:Internet}
+  - {name: Expenses:Utilities:Phone}
+  - {name: Expenses:Utilities:Water}
+  - {name: Expenses:Insurance, report_line: Insurance}
+  - {name: Expenses:Insurance:Home}
+  - {name: Expenses:Insurance:HomeAuto}
+  - {name: Expenses:Insurance:Life}
+  - {name: Expenses:Healthcare, report_line: Healthcare}
+  - {name: Expenses:Baby, report_line: Baby, description: "Baby/child supplies: diapers, wipes, formula, bottles, gear, clothing, toys, children's books"}
+  - {name: Expenses:Software, report_line: Software}
+  - {name: Expenses:Subscriptions, report_line: Subscriptions}
+  - {name: Expenses:Shopping, report_line: Shopping}
+  - {name: Expenses:Shopping:Clothing}
+  - {name: Expenses:Shopping:Electronics}
+  - {name: Expenses:Entertainment, report_line: Entertainment}
+  - {name: Expenses:Entertainment:Books}
+  - {name: Expenses:Travel, report_line: Travel, description: "Tag trips with a dimension (trip:<code>) so per-trip totals can be reported"}
+  - {name: Expenses:Travel:Vacation}
+  - {name: Expenses:Education, report_line: Education}
+  - {name: Expenses:PersonalCare, report_line: Personal care}
+  - {name: Expenses:Gifts, report_line: Gifts}
+  - {name: Expenses:Charity, report_line: Charity}
+  - {name: Expenses:Charity:Tithing}
+  - {name: Expenses:Taxes, report_line: Taxes}
+  - {name: Expenses:Taxes:Federal}
+  - {name: Expenses:Taxes:State}
+  - {name: Expenses:Taxes:Penalties}
+  - {name: Expenses:Taxes:Property}
+  - {name: Expenses:Interest, report_line: Interest expense, description: Interest on loans other than the home mortgage}
+  - {name: Expenses:Fees, report_line: Fees}
+  - {name: Expenses:Fees:Bank}
+  - {name: Expenses:Fees:CardAnnual}
+  - {name: Expenses:Fees:Investment}
+  - {name: Expenses:Misc, report_line: Other expenses}
+  - {name: Expenses:Uncategorized, report_line: Uncategorized expenses}

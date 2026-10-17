@@ -1,0 +1,6 @@
+# TEMPLATE for person-specific categorization rules. Copy to $FINANCE_DATA/config/rules.local.yaml.
+# Same format as rules/categories.yaml; evaluated BEFORE the repo rules.
+rules:
+  - {name: land-payments, match: '(?i)WIRE OUT BNF <SELLER>', account: Assets:RealEstate:Land, dimensions: ['project:<PROJECT>']}
+  - {name: architect, match: '(?i)<DESIGN FIRM>', direction: out, account: Expenses:Housing:Design, dimensions: ['project:<PROJECT>']}
+  - {name: rent, match: '(?i)<LANDLORD NAME>', account: Expenses:Housing:Rent}
