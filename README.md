@@ -85,10 +85,10 @@ finance report statements       --from … --to … --format json    # all three
 scripts/statements.py statements.json OUTDIR [--notes notes.json]   # phone PDFs (light, dark) + HTML, xlsx (+ glossary)
 ```
 
-Statements: the balance sheet is classified (current assets, investments, property, current and
+Statements: the Balance Sheet is classified (current assets, investments, property, current and
 long-term liabilities, equity = opening equity + accumulated net income), one column per period
-end. The income statement groups income, living expenses, non-operating items and taxes, with a
-savings rate. The cash flow uses the indirect method: net income, adjusted for non-cash items
+end. The Profit and Loss Statement groups income, living expenses, non-operating items and taxes, with a
+savings rate. The Statement of Cash Flows uses the indirect method: net income, adjusted for non-cash items
 (shares received as pay, depreciation) and investment gains, plus working-capital changes, then
 investing and financing. Entries with no cash line (e.g. land bought with a loan) are left out and
 shown as memo rows. `scripts/statements.py`
@@ -100,7 +100,11 @@ light/dark setting (`prefers-color-scheme`); the PDF comes as `statements.pdf` (
 investing / financing activities, net worth (equity), ...). In the HTML, less familiar terms are
 dotted-underlined buttons that open a one- or two-sentence definition on tap (native `popover`,
 small inline script fallback; tap again or outside to close); the PDFs underline them and add a
-Glossary section, the xlsx a Glossary sheet. Local `statement-notes.json` can add takeaways and
+Glossary section, the xlsx a Glossary sheet. In the HTML every account line of the three statements is
+a native `<details>` row (no script) that expands to the ledger transactions behind it (date,
+payee/description, amount; read from `v_ledger` by `scripts/ledgerdetail.py`, nested by account
+hierarchy, embedded in the file) and reconciles to the statement line; the script reports any line
+that does not. The PDFs omit the detail. File names stay `statements.*`. Local `statement-notes.json` can add takeaways and
 footnotes (with `[[term|text]]` markup) and override definitions (`"glossary": {term: text}`).
 
 `categorize` and `transfers match` rebuild the whole journal from staging. The raw folder is

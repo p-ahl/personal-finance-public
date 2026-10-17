@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
 """Render the classified statements (JSON from `finance report statements`) as:
 
-  statements.xlsx   one sheet per statement, full monthly detail (numbers as numbers,
-                    frozen headers, negatives in parentheses) + a Summary and a Glossary sheet
-  statements.html   phone-friendly single file (summary, balance sheet, income statement,
-                    cash flow; two number columns max; whole dollars); light or dark following
-                    the viewer's system setting (prefers-color-scheme); glossary terms are
-                    dotted-underlined buttons that open a short definition on tap (popover)
+  statements.xlsx   one sheet per statement (Balance Sheet, Profit and Loss Statement,
+                    Statement of Cash Flows), full monthly detail (numbers as numbers, frozen
+                    headers, negatives in parentheses) + a Summary and a Glossary sheet
+  statements.html   phone-friendly single file (summary, Balance Sheet, Profit and Loss Statement,
+                    Statement of Cash Flows; two number columns max; whole dollars); light or dark
+                    following the viewer's system setting (prefers-color-scheme); glossary terms are
+                    dotted-underlined buttons that open a short definition on tap (popover). Every
+                    account line on the three statements is a native <details> row (no script) that
+                    expands to its ledger transactions (date, payee/description, amount) nested by
+                    account hierarchy, all embedded in the file; subtotals reconcile to the statement
+                    line (scripts/ledgerdetail.py reads v_ledger and checks every line)
   statements.pdf    the same HTML printed to a portrait phone-width PDF (headless Chrome), light;
-                    glossary terms underlined and defined in a Glossary section at the end
+                    concise: no transaction detail; glossary terms underlined and defined in a
+                    Glossary section at the end
   statements-dark.pdf  the same layout in the dark palette (full-page dark background)
 
-Labels use standard accounting terms (current / non-current assets, accounts payable, accrued
-liabilities, cash flows from operating / investing / financing activities, ...); net worth is
-shown as "Net worth (equity)".
+File names are unchanged (statements.*) so routines keep working. Labels use standard accounting
+terms (current / non-current assets, accounts payable, accrued liabilities, cash flows from
+operating / investing / financing activities, ...); net worth is shown as "Net worth (equity)".
 
 Usage:
   finance report statements --from YYYY-MM-01 --to YYYY-MM-DD --period month --extra ytd,ttm \
@@ -40,6 +46,7 @@ from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import reportcfg as RC  # noqa: E402  (local labels: $FINANCE_DATA/config/report.local.yaml)
+from ledgerdetail import Detail, Node  # noqa: E402  (transactions behind each statement line)
 
 HL = RC.load()["highlights"]
 BROKER = RC.load()["brokerage_name"].lower()
@@ -187,7 +194,7 @@ GLOSSARY = {
                      "Net income divided by total income: the share of everything that came in that we kept (it "
                      "added to net worth) instead of spending it or paying it in tax."),
     "indirect": ("Indirect method",
-                 "The cash flow statement starts from net income and adjusts it to cash (removing non-cash items "
+                 "The Statement of Cash Flows starts from net income and adjusts it to cash (removing non-cash items "
                  "and timing differences), then adds cash spent or raised by investing and financing."),
     "operating": ("Operating activities",
                   "Cash from everyday earning and spending: net income, adjusted for non-cash items (investment gains, pay "
@@ -347,6 +354,15 @@ INV_ORDER = [
     "Vehicles bought and sold, net",
 ]
 FIN_NAMES = {"Mortgages": "Mortgage principal repaid", "Loans": "[[related|Related-party note]], net"}
+
+
+def tax_bucket(key):
+    """Index into TAX_LINES for a Taxes item key (same rule as is_lines)."""
+    k = 0
+    for j, (_, pats) in enumerate(TAX_LINES):
+        if pats and any(p.lower() in (key or "").lower() for p in pats):
+            k = j
+    return k
 
 
 def is_lines(IS, i):
@@ -615,6 +631,32 @@ dl.gloss dt { font-weight: 700; margin-top: 9px; break-after: avoid; }
 dl.gloss dd { margin: 2px 0 0; color: var(--muted); }
 details.gloss { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 10px; }
 details.gloss summary { font-weight: 700; font-size: 17px; color: var(--accent); cursor: pointer; }
+/* expanding account rows (native details/summary: no script). Numbers line up with the table columns. */
+table.st { table-layout: fixed; }
+td.x { padding: 0; text-align: left; white-space: normal; }
+tr.sub td.x { font-size: 15px; }
+details.x > summary { display: grid; grid-template-columns: minmax(0, 1fr) 5.8em 5.8em; padding: 7px 0; cursor: pointer;
+       list-style: none; -webkit-tap-highlight-color: transparent; }
+details.x > summary::-webkit-details-marker { display: none; }
+details.x > summary > span { padding-left: 16px; position: relative; }
+details.x > summary > span::before { content: ""; position: absolute; left: 1px; top: 0.55em; border-style: solid;
+       border-width: 4px 0 4px 6px; border-color: transparent transparent transparent var(--muted); }
+details.x[open] > summary > span::before { border-width: 6px 4px 0 4px; border-color: var(--muted) transparent transparent transparent; top: 0.65em; }
+details.x > summary > b { font-weight: inherit; text-align: right; padding-left: 8px; font-variant-numeric: tabular-nums;
+       white-space: nowrap; }
+b.n { color: var(--neg); }
+tr.total details.x > summary, tr.grand details.x > summary { font-weight: 700; }
+tr.sub td.x > details > summary > span { padding-left: 30px; }
+tr.sub td.x > details > summary > span::before { left: 15px; }
+.d { margin: 0 0 6px 10px; padding-left: 8px; border-left: 2px solid var(--line); font-size: 14.5px; font-weight: 400; }
+.d details.x > summary { padding: 5px 0; border-top: 1px solid var(--line); }
+.d > p { display: grid; grid-template-columns: 4.3em minmax(0, 1fr) auto; gap: 6px; margin: 0; padding: 3px 0;
+       border-top: 1px dotted var(--line); font-size: 13px; line-height: 1.3; color: var(--muted); }
+.d > p i { font-style: normal; font-variant-numeric: tabular-nums; }
+.d > p b { font-weight: 400; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
+.d > p b.n { color: var(--neg); }
+.d > p.p { opacity: .6; }
+.d > p.nt { display: block; margin: 4px 0; font-size: 13px; color: var(--muted); }
 @page { size: 4.5in 11in; margin: 0.28in 0.25in; }
 tr, .kpi, li, .keep { break-inside: avoid; }
 h2 { break-after: avoid; }
@@ -739,9 +781,12 @@ def td(v, cls=""):
     return f'<td class="{c} {cls}">{money(v)}</td>'
 
 
-def table(headers, body):
-    """headers: already-rendered HTML."""
+def table(headers, body, expand=False):
+    """headers: already-rendered HTML. expand: statement table with expanding rows (fixed columns)."""
     h = "".join(f"<th>{x}</th>" for x in headers)
+    if expand:
+        return (f'<table class="st"><colgroup><col><col style="width:5.8em"><col style="width:5.8em"></colgroup>'
+                f"<thead><tr>{h}</tr></thead><tbody>{''.join(body)}</tbody></table>")
     return f"<table><thead><tr>{h}</tr></thead><tbody>{''.join(body)}</tbody></table>"
 
 
@@ -785,12 +830,32 @@ def warn_sum(what, parts, total):
         print(f"statements: {what}: lines sum to {sum(parts):,.2f} but the statement total is {total:,.2f}", file=sys.stderr)
 
 
-def build_html(as_of, BS, IS, CF, notes, theme="", highlights=None):
+def build_html(as_of, BS, IS, CF, notes, theme="", highlights=None, detail=None):
     """theme: "" follows the system light/dark setting (interactive definitions); "light" or "dark"
     pins one for the PDFs (terms underlined, Glossary section at the end).
     highlights: optional list of (label markup, signed dollars) for the YTD cash-flow highlights block."""
     T = Terms(glossary(notes, IS), interactive=not theme)
     highlights = highlights or []
+    dtl = detail if (detail is not None and not theme) else None  # expanding rows: the system-theme HTML only
+    dim_bs = BS["columns"][0]["to"]
+    dim_pl = ""
+    if dtl:
+        from datetime import timedelta
+        dim_pl = (date.fromisoformat(dtl.pl_cols[0][0]) - timedelta(days=1)).isoformat()
+
+    def X(label, vals, cls="", nodes=None, top=None, what="", wins=None, dim=""):
+        """A statement row; with ledger detail it is an expanding <details> row."""
+        if not dtl or (nodes is None and top is None):
+            return tr(label, vals, cls)
+        nodes = [n for n in (nodes or []) if n is not None]
+        if top is None:
+            if not nodes:
+                return tr(label, vals, cls)
+            top = nodes[0] if len(nodes) == 1 else Node("", kids=nodes)
+        dtl.verify(what or plain(label), [top], wins, vals)
+        return f'<tr class="{cls}"><td colspan="3" class="x">{dtl.render(top, label, wins, dim, vals=vals)}</td></tr>\n'
+
+    bw, pw = (dtl.bs_cols, dtl.pl_cols) if dtl else (None, None)
     nb = len(BS["columns"])
     i_open, i_now = 0, nb - 1
     open_lbl, now_lbl = BS["columns"][i_open]["label"], BS["columns"][i_now]["label"]
@@ -867,7 +932,8 @@ def build_html(as_of, BS, IS, CF, notes, theme="", highlights=None):
                f'<meta name="color-scheme" content="{scheme}">'
                f'<title>Household financial statements, {html.escape(now_lbl)}</title><style>{CSS}</style></head><body><main>')
     # ---- page 1 summary
-    hint = "Tap a dotted-underlined term for its definition." if not theme else "Dotted-underlined terms are defined in the Glossary at the end."
+    hint = ("Tap a dotted-underlined term for its definition; tap a line on a statement to see its transactions."
+            if not theme else "Dotted-underlined terms are defined in the Glossary at the end.")
     out.append(f'<section><h1>Our finances</h1><p class="sub">As of {html.escape(now_lbl)} · {T("[[accrual|accrual basis]]")}'
                f'<br>{hint}</p>')
     out.append(f'<div class="kpi"><div class="lbl">{T("[[networth|Net worth (equity)]]")}</div><div class="big">{money(nw(i_now))}</div>'
@@ -877,12 +943,12 @@ def build_html(as_of, BS, IS, CF, notes, theme="", highlights=None):
                f'<div class="lbl">{T("[[savings_rate|savings rate]]")} {rate_y:.0%}</div></div>'
                f'<div class="kpi"><div class="lbl">{th()} net income</div><div class="big">{money(ni_t)}</div>'
                f'<div class="lbl">savings rate {rate_t:.0%}</div></div></div>')
-    out.append(table(["", yh(), th()], [
+    out.append(table(["Profit and Loss", yh(), th()], [
         tr("Total income", [income_y, income_t]),
         tr("Total expenses (incl. taxes)", [spend_y, spend_t]),
         tr("Net income", [ni_y, ni_t], "total"),
     ]))
-    out.append(table(["Cash flows", yh(), th()], [
+    out.append(table(["Statement of Cash Flows", yh(), th()], [
         tr(T("[[operating|Operating activities]]"), [cy["op"], ct["op"]]),
         tr(T("[[investing|Investing activities]]"), [cy["invt"], ct["invt"]]),
         tr(T("[[financing|Financing activities]]"), [cy["fint"], ct["fint"]]),
@@ -911,7 +977,7 @@ def build_html(as_of, BS, IS, CF, notes, theme="", highlights=None):
             pa.append(a)
             pb.append(b)
             if round(a) or round(b):
-                rows_.append(tr(T(name), [a, b]))
+                rows_.append(X(T(name), [a, b], nodes=dtl.bs_group(groups) if dtl else None, wins=bw, dim=dim_bs))
         return rows_, sum(pa), sum(pb)
 
     body = [head(T("[[current_assets|Current assets]]"))]
@@ -935,15 +1001,20 @@ def build_html(as_of, BS, IS, CF, notes, theme="", highlights=None):
                 "net-income": "[[retained|Retained earnings]] (net income since books start)"}
     for r in rows(BS, kind="item", group="Equity"):
         if round(val(r, i_open)) or round(val(r, i_now)):
-            body.append(tr(T(eq_names.get(r.get("key"), r["label"])), [val(r, i_open), val(r, i_now)], "sub"))
+            top = None
+            if dtl:
+                top = dtl.equity_opening() if r.get("key") == "opening-equity" else dtl.ni_breakdown("bs")
+            body.append(X(T(eq_names.get(r.get("key"), r["label"])), [val(r, i_open), val(r, i_now)], "sub",
+                          top=top, what=r["label"], wins=bw, dim=dim_bs))
     chk = row_val(BS, "Check: assets - liabilities - equity (must be 0)", i_now)
     body.append(f'<tr class="{"ok" if round(chk, 2) == 0 else "bad"}"><td>Check: total assets − total liabilities = net worth (equity)</td>'
                 f'<td></td><td>{"✓" if round(chk, 2) == 0 else money(chk)}</td></tr>')
-    owed = [r for r in rows(BS, kind="item", group="Money owed to us") if round(val(r, i_now))]
+    owed = [r for r in rows(BS, kind="item", group="Money owed to us") if round(val(r, i_now))] if not dtl else []
     sub = "".join(tr(html.escape(r["label"]), [val(r, i_open), val(r, i_now)], "sub") for r in owed)
     hdr = ["", html.escape(open_lbl), html.escape(now_lbl)]
-    out.append('<section class="page"><h2>Balance sheet</h2><p class="sub">Statement of financial position: what we own and owe</p>')
-    out.append(table(hdr, body))
+    out.append('<section class="page"><h2>Balance Sheet</h2><p class="sub">Statement of financial position: what we own and owe'
+               + (f'<br>Tap a line for its transactions; dimmed ones are on or before {html.escape(open_lbl)}.' if dtl else '') + '</p>')
+    out.append(table(hdr, body, expand=bool(dtl)))
     if sub:
         out.append(f'<div class="keep"><p class="sub" style="margin-top:12px">{T("[[ar|Accounts receivable]]")} detail</p>'
                    + table(hdr, [sub]) + '</div>')
@@ -951,46 +1022,72 @@ def build_html(as_of, BS, IS, CF, notes, theme="", highlights=None):
 
     # ---- income statement
     body = [head(T("[[revenue|Revenue and gains]]"))]
-    for (n, a), (_, b) in zip(inc_y, inc_t):
+    for (n, a), (_, b), (_, grp) in zip(inc_y, inc_t, INCOME):
         if round(a) or round(b):
-            body.append(tr(T(n), [a, b]))
+            body.append(X(T(n), [a, b], nodes=dtl.pl_items(grp) if dtl else None, wins=pw, dim=dim_pl))
     body.append(tr("Total income", [income_y, income_t], "total"))
     body.append(head(T("[[opex|Operating expenses]]")))
-    for (n, a), (_, b) in sorted(zip(opx_y, opx_t), key=lambda x: -x[0][1]):
+    for (n, a), (_, b), (_, grp) in sorted(zip(opx_y, opx_t, OPEX), key=lambda x: -x[0][1]):
         if round(a) or round(b):
-            body.append(tr(T(n), [a, b]))
+            body.append(X(T(n), [a, b], nodes=dtl.pl_items(grp) if dtl else None, wins=pw, dim=dim_pl))
     body.append(tr("Total operating expenses", [opex_y, opex_t], "total"))
     body.append(head("Interest and taxes"))
-    for (n, a), (_, b) in zip(oth_y, oth_t):
+    tax_keys = [{r["key"] for r in rows(IS, kind="item", group="Taxes") if tax_bucket(r["key"]) == j}
+                for j in range(len(TAX_LINES))]
+    for idx, ((n, a), (_, b)) in enumerate(zip(oth_y, oth_t)):
         if round(a) or round(b):
-            body.append(tr(T(n), [a, b]))
+            nodes = None
+            if dtl:
+                nodes = (dtl.pl_items(INTEREST[1], sign=-1) if idx == 0
+                         else dtl.pl_items(["Taxes"], keys=tax_keys[idx - 1]))
+            body.append(X(T(n), [a, b], nodes=nodes, wins=pw, dim=dim_pl))
     body.append(tr("Total expenses", [spend_y, spend_t], "total"))
     body.append(tr("Net income", [ni_y, ni_t], "grand"))
     body.append(f'<tr><td>{T("[[savings_rate|Savings rate]]")}</td><td>{rate_y:.0%}</td><td>{rate_t:.0%}</td></tr>')
-    out.append(f'<section class="page"><h2>Income statement</h2><p class="sub">{yh()} and {th()} ({html.escape(ttm_rng)})</p>')
-    out.append(table(["", yh(), th()], body))
+    out.append(f'<section class="page"><h2>Profit and Loss Statement</h2><p class="sub">{yh()} and {th()} ({html.escape(ttm_rng)})'
+               + (f'<br>Tap a line for its transactions (TTM period); dimmed ones are before {nice_date(dtl.pl_cols[0][0])}, so in TTM only.'
+                  if dtl else '') + '</p>')
+    out.append(table(["", yh(), th()], body, expand=bool(dtl)))
     wages = [r for r in rows(IS, kind="item", group="Wages and salaries") if round(val(r, iy)) or round(val(r, it))]
-    if wages:
+    if wages and not dtl:
         out.append('<div class="keep"><p class="sub" style="margin-top:12px">Wages and salaries by person</p>' +
                    table(["", yh(), th()], [tr(html.escape(r["label"]), [val(r, iy), val(r, it)], "sub") for r in wages]) + '</div>')
     out.append('<div class="keep"><p class="sub" style="margin-top:12px">Net income by month</p>' + chart_svg([m for m, _ in months], mvals) + '</div>')
     out.append("</section>")
 
     # ---- cash flow
+    def cfn(kind, key, label=None):
+        return dtl.cf_target(kind, key, label) if dtl else None
+
+    cf_adj = [(r["label"], "noncash" if r["label"].startswith("Non-cash") else "gain")
+              for r in rows(CF, kind="item", section="Operating") if r.get("group") == "Non-cash items"]
+    cf_wc = [(r["label"], r["key"]) for r in rows(CF, kind="item", section="Operating")
+             if r.get("group") == "Changes in working capital"]
+    esc = lambda x: html.escape(x, quote=False)  # noqa: E731
     body = [head(T("Cash flows from [[operating|operating activities]]")),
-            tr("Net income", [cy["ni"], ct["ni"]]),
-            tr(T("[[noncash_adj|Adjustments for non-cash items]]"), [cy["adj"], ct["adj"]]),
-            tr(T("[[wc|Changes in working capital]]"), [cy["wc"], ct["wc"]]),
+            X("Net income", [cy["ni"], ct["ni"]], top=dtl.ni_breakdown("pl") if dtl else None, wins=pw, dim=dim_pl),
+            X(T("[[noncash_adj|Adjustments for non-cash items]]"), [cy["adj"], ct["adj"]],
+              nodes=[cfn("adj", k, esc(plain(l))) for l, k in cf_adj], wins=pw, dim=dim_pl),
+            X(T("[[wc|Changes in working capital]]"), [cy["wc"], ct["wc"]],
+              nodes=[cfn("wc", k, esc(l)) for l, k in cf_wc], wins=pw, dim=dim_pl),
             tr("Net cash from operating activities", [cy["op"], ct["op"]], "total"),
             head(T("Cash flows from [[investing|investing activities]]"))]
     inv_names = set(cy["inv"]) | set(ct["inv"])
     inv_ordered = [n for n in INV_ORDER if n in inv_names] + sorted(inv_names - set(INV_ORDER), key=plain)
+    inv_keys = {}
+    for r in rows(CF, kind="item", section="Investing"):
+        inv_keys.setdefault(INV_NAMES.get(r.get("group"), r["label"]), []).append(r["key"])
+    fin_keys = {}
+    for r in rows(CF, kind="item", section="Financing"):
+        fin_keys.setdefault(FIN_NAMES.get(r.get("group"), r["label"]), []).append(r["key"])
     for n in inv_ordered:
-        body.append(tr(T(n), [cy["inv"].get(n, 0), ct["inv"].get(n, 0)]))
+        body.append(X(T(n), [cy["inv"].get(n, 0), ct["inv"].get(n, 0)],
+                      nodes=[cfn("inv", k) for k in inv_keys.get(n, [])], wins=pw, dim=dim_pl))
     body.append(tr("Net cash from investing activities", [cy["invt"], ct["invt"]], "total"))
     body.append(head(T("Cash flows from [[financing|financing activities]]")))
     for n in sorted(set(cy["fin"]) | set(ct["fin"]), key=plain):
-        body.append(tr(T(n), [cy["fin"].get(n, 0), ct["fin"].get(n, 0)]))
+        body.append(X(T(n), [cy["fin"].get(n, 0), ct["fin"].get(n, 0)],
+                      nodes=[cfn("fin", k) for k in fin_keys.get(n, [])], wins=pw, dim=dim_pl))
     body.append(tr("Net cash from financing activities", [cy["fint"], ct["fint"]], "total"))
     body.append(tr("Net change in cash", [cy["net"], ct["net"]], "total"))
     body.append(tr("Cash and cash equivalents, beginning of period", [cy["start"], ct["start"]]))
@@ -998,15 +1095,20 @@ def build_html(as_of, BS, IS, CF, notes, theme="", highlights=None):
     ok = round(cy["check"], 2) == 0 and round(ct["check"], 2) == 0
     body.append(f'<tr class="{"ok" if ok else "bad"}"><td>Check: ties to cash on the balance sheet</td>'
                 f'<td>{"✓" if round(cy["check"],2)==0 else money(cy["check"])}</td><td>{"✓" if round(ct["check"],2)==0 else money(ct["check"])}</td></tr>')
-    out.append(f'<section class="page"><h2>Statement of cash flows</h2><p class="sub">{T("[[indirect|Indirect method]]")}: '
-               'net income adjusted to cash</p>')
-    out.append(table(["", yh(), th()], body))
+    out.append(f'<section class="page"><h2>Statement of Cash Flows</h2><p class="sub">{T("[[indirect|Indirect method]]")}: '
+               'net income adjusted to cash'
+               + (f'<br>Tap a line for the transactions behind it (TTM period); dimmed ones are before {nice_date(dtl.pl_cols[0][0])}.'
+                  if dtl else '') + '</p>')
+    out.append(table(["", yh(), th()], body, expand=bool(dtl)))
     if cy["memo"] or ct["memo"]:
         labs = sorted(set(l for l, _ in cy["memo"]) | set(l for l, _ in ct["memo"]), key=plain)
         md, mt = dict(cy["memo"]), dict(ct["memo"])
+        memo_keys = {memo_label(r): r["key"] for r in rows(CF, kind="memo")}
         out.append(f'<div class="keep"><p class="sub" style="margin-top:12px">{T("[[noncash|Non-cash investing and financing activities]]")}'
                    ' (for reference)</p>' +
-                   table(["", yh(), th()], [tr(T(l), [md.get(l, 0), mt.get(l, 0)], "sub") for l in labs]) + '</div>')
+                   table(["", yh(), th()], [X(T(l), [md.get(l, 0), mt.get(l, 0)], "sub", nodes=[cfn("memo", memo_keys[l])]
+                                              if l in memo_keys else None, wins=pw, dim=dim_pl) for l in labs],
+                         expand=bool(dtl)) + '</div>')
     out.append('<h2 style="margin-top:16px;font-size:17px">Notes</h2><ul class="notes">' +
                "".join(f"<li>{T(f)}</li>" for f in foot) + "</ul></section>")
     if theme:
@@ -1137,10 +1239,14 @@ def build_xlsx(path, as_of, stmts, summary_rows, gloss):
     head_fill = PatternFill("solid", fgColor="DCE6F1")
     sec_fill = PatternFill("solid", fgColor="F2F2F2")
     thin = Side(style="thin", color="000000")
-    names = {"balance-sheet": "Balance sheet", "income-statement": "Income statement", "cash-flow": "Cash flow statement"}
+    names = {"balance-sheet": "Balance Sheet", "income-statement": "Profit and Loss Statement",
+             "cash-flow": "Statement of Cash Flows"}
+    titles = {"balance-sheet": "Balance Sheet (statement of financial position)",
+              "income-statement": "Profit and Loss Statement",
+              "cash-flow": "Statement of Cash Flows (indirect method)"}
     for s in stmts:
         ws = wb.create_sheet(names[s["kind"]])
-        ws.append([s["title"] + " - " + s["basis"] + " basis"] + [c["label"] for c in s["columns"]])
+        ws.append([titles.get(s["kind"], s["title"]) + " - " + s["basis"] + " basis"] + [c["label"] for c in s["columns"]])
         for c in ws[1]:
             c.font = bold
             c.fill = head_fill
@@ -1251,7 +1357,7 @@ def main():
     ap.add_argument("outdir")
     ap.add_argument("--notes", default="")
     ap.add_argument("--chrome", default="")
-    ap.add_argument("--db", default="", help="ledger SQLite for cash-flow highlights (default: FINANCE_DB or ../finance-data/finance.db)")
+    ap.add_argument("--db", default="", help="ledger SQLite for cash-flow highlights and transaction detail (default: FINANCE_DB or ../finance-data/finance.db)")
     a = ap.parse_args()
     os.makedirs(a.outdir, exist_ok=True)
     as_of, BS, IS, CF = load(a.json)
@@ -1260,7 +1366,19 @@ def main():
     ytd_from = (IS["columns"][iy] or {}).get("from") if iy is not None else None
     ytd_to = (IS["columns"][iy] or {}).get("to") if iy is not None else as_of
     highlights = cash_flow_highlights(find_db(a.db), ytd_from, ytd_to)
-    page = build_html(as_of, BS, IS, CF, notes, highlights=highlights)
+    detail = None
+    dbp = find_db(a.db)
+    if dbp:
+        try:
+            detail = Detail(dbp, as_of, BS, IS, CF)
+        except Exception as e:  # the statements still render, without the expanding rows
+            print(f"statements: transaction detail skipped ({e})", file=sys.stderr)
+    page = build_html(as_of, BS, IS, CF, notes, highlights=highlights, detail=detail)
+    if detail is not None and detail.problems:
+        for p in detail.problems:
+            print(f"statements: detail does not reconcile: {p}", file=sys.stderr)
+    elif detail is not None:
+        print("statements: transaction detail reconciles to every statement line", file=sys.stderr)
     hp = os.path.join(a.outdir, "statements.html")
     open(hp, "w").write(page)
 

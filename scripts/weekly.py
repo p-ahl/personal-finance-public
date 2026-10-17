@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Weekly financial report: net worth bridge, week's income and spending, cash vs goal,
+"""Weekly financial report: net worth bridge, the week's Profit and Loss, cash vs goal,
 upcoming bills, open items, and trend charts (scripts/charts.py). Every figure is a query over the ledger (v_ledger and the accrual
 views); estimates are labelled.
 
@@ -451,7 +451,7 @@ def load_prior(path):
     wb = load_workbook(xp, data_only=True)
     br = list(wb["Bridge"].iter_rows(values_only=True))
     nw = int(round(br[-1][1] * 100))
-    rows = list(wb["Balance sheet"].iter_rows(values_only=True))
+    rows = list(wb["Balance Sheet" if "Balance Sheet" in wb.sheetnames else "Balance sheet"].iter_rows(values_only=True))  # sheet renamed Oct 2026
     bs = {r[0]: int(round((r[3] or 0) * 100)) for r in rows[1:] if r[0]}
     crow = list(wb["Cash"].iter_rows(values_only=True))
     cash = {r[0]: int(round((r[2] or 0) * 100)) for r in crow[1:]
@@ -607,7 +607,7 @@ def build_html(A, B, theme=""):
     out.append('<ul class="notes">' + "".join(f"<li>{T(n, escape=False) if '[[' in n else n}</li>" for n in notes) + "</ul></section>")
 
     # 2. income and spending
-    out.append('<section><h2>2. Income and spending</h2>')
+    out.append('<section><h2>2. Profit and Loss, this week</h2>')
     out.append(table(["", "This week"], [
         row("Pay and other income", [A["week_income_ops"]]),
         (row(T("Market value change, crypto and Fidelity ([[realized|realized]] + [[unrealized|unrealized]], same as the bridge)"),
@@ -711,7 +711,7 @@ def build_html(A, B, theme=""):
     if A.get("charts"):
         out.append('<section class="keep"><h2>Trends</h2>' + A["charts"] +
                    '<ul class="notes"><li>Month-end balances and monthly totals from the ledger, checked to the cent '
-                   'against the balance sheet and income statement. Full set: scripts/charts.py.</li></ul></section>')
+                   'against the Balance Sheet and Profit and Loss Statement. Full set: scripts/charts.py.</li></ul></section>')
     out.append('<ul class="notes"><li>Source: ledger only (v_ledger, v_open_payables, v_open_receivables, v_uncategorized); '
                f"{CFG['plan_items_phrase']} come from the {plan_name(A)} cash plan and are estimates"
                + (f"; last week's reported figures from {e(os.path.basename(A['prior']['dir']))}/weekly.xlsx" if A["prior"] else "")
@@ -755,7 +755,7 @@ def build_xlsx(path, A, B):
     sheet("Bridge", ["Line", "USD"], br, (2,))
     sheet("Bridge detail", ["Bridge line", "Date", "Account", "Net worth effect", "Counterparty", "Description", "Source"],
           [(S.plain(n), r[2], strip_mask(r[3]), -r[6] / 100, r[8], strip_mask(r[9])[:120], r[7]) for _, n, _, ls in A["bridge"] for r in ls], (4,))
-    sheet("Balance sheet", ["Account", "Line", str(A["baseline"]), str(A["as_of"])],
+    sheet("Balance Sheet", ["Account", "Line", str(A["baseline"]), str(A["as_of"])],
           [(B.label(a), rl, v0 / 100, v1 / 100) for a, rl, v0, v1 in A["bs"]], (3, 4))
     sheet("Spending by category", ["Category", "This week", "Avg/week (4 wk)"],
           [(k, w / 100, a / 100) for k, w, a in A["cats"]], (2, 3))
@@ -831,7 +831,7 @@ def main():
             if not a.baseline:
                 base = prior["date"]
     A = analyse(B, as_of, ws, base, a.goal, plan, prior, a.open_item)
-    import charts as C  # trends section (cash vs goal, income vs spending); validated against the views
+    import charts as C  # trends section (cash vs goal, Profit and Loss by month); validated against the views
     A["charts"] = C.weekly_section(a.db, as_of, a.goal, a.trips.split(",")[0])
     open(os.path.join(out, "weekly.html"), "w").write(build_html(A, B))
     xp = os.path.join(out, "weekly.xlsx")

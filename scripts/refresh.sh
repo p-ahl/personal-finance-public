@@ -226,7 +226,7 @@ overall=OK
 inserted=$(sed -nE 's/^([0-9]+) inserted.*/\1/p' <<<"$journal")
 diffcount() { [[ -n $1 && -n $2 ]] && echo $(( $2 - $1 )) || echo "?"; }
 
-# Financial statements (balance sheet, income statement, cash flow): trailing 12 months by
+# Financial statements (Balance Sheet, Profit and Loss Statement, Statement of Cash Flows): trailing 12 months by
 # month plus YTD/TTM, as JSON + CSV, then the phone HTML (follows the phone's light/dark
 # setting), statements.pdf (light) + statements-dark.pdf and the xlsx when python3 (with
 # openpyxl) and chrome are available. Only after a passing check; failures here never fail

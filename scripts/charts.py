@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Charts of the household finances over time: cash vs goal, income vs spending, assets and
+"""Charts of the household finances over time: cash vs goal, Profit and Loss by month, assets and
 liabilities, spending by category. Every point is a query over the ledger (v_ledger); each month
 is reconciled to the cent against v_balance_sheet and v_income_statement_monthly before anything
 is written (the script exits non-zero if a check fails).
@@ -236,7 +236,7 @@ def validate(q, D, points, ao):
         cash_v = sum(D["cash"][k][i] for k, _, _ in CASH_SERIES) + D["cash"]["trips"][i]
         ok = got_a == exp_a == D["assets_total"][i] and got_l == exp_l and cash_v == D["cash"]["total"][i] \
             and D["nw"][i] == exp_a - exp_l
-        (out if ok else bad).append(f"{dt} balance sheet: assets {money_c(got_a)} vs {money_c(exp_a)}, "
+        (out if ok else bad).append(f"{dt} Balance Sheet: assets {money_c(got_a)} vs {money_c(exp_a)}, "
                                     f"liabilities {money_c(got_l)} vs {money_c(exp_l)} {'OK' if ok else 'MISMATCH'}")
     # income statement: v_income_statement_monthly minus lines in that month dated after as-of
     for i, mth in enumerate(D["months"]):
@@ -248,7 +248,7 @@ def validate(q, D, points, ao):
         got_i = D["income_total"][i] + D["income"]["unrealized"][i]
         got_e = D["living"][i] + D["taxes"][i]
         ok = got_i == exp_i and got_e == exp_e and sum(v[i] for v in D["cats"].values()) == D["living"][i]
-        (out if ok else bad).append(f"{mth} income statement: income {money_c(got_i)} vs {money_c(exp_i)}, "
+        (out if ok else bad).append(f"{mth} Profit and Loss Statement: income {money_c(got_i)} vs {money_c(exp_i)}, "
                                     f"expenses {money_c(got_e)} vs {money_c(exp_e)} {'OK' if ok else 'MISMATCH'}")
     if bad:
         raise SystemExit("charts: validation failed\n" + "\n".join(bad))
@@ -388,7 +388,7 @@ def income_svg(D, cid="c-inc", compact=False):
     neg = [("Living spending", COLORS["living"], D["living"]), ("Taxes", COLORS["taxes"], D["taxes"])]
     marks = [(D["months"].index(m), "★" * (j + 1)) for j, m in enumerate(sorted(D["inc_notes"]))] if not compact else []
     return svg_chart(cid, D["labels"], pos=pos, neg=neg, lines=[("Net savings", COLORS["net"], D["net_savings"], False)],
-                     marks=marks, height=210 if compact else 270, title="Income vs spending by month",
+                     marks=marks, height=210 if compact else 270, title="Profit and Loss by month: income vs expenses",
                      tick_every=2 if compact else 1)
 
 
@@ -456,12 +456,12 @@ def build_html(D, goal, theme=""):
                              title="Weekly cash", tick_every=max(1, len(wk["labels"]) // 6)))
     out.append("</section>")
     # 2 income vs spending
-    out.append(f'<section><h2>2. Income vs spending</h2>' + income_svg(D))
+    out.append(f'<section><h2>2. Profit and Loss by month</h2>' + income_svg(D))
     out.append('<ul class="notes"><li>Bars above zero are income; below zero are living spending and taxes '
                '(taxes kept apart). The line is net savings = income − spending − taxes.</li>'
                f'<li>{T("[[unrealized|Unrealized]]")} market gains and losses are left out of income '
                f'(total in the period: {money_c(sum(D["income"]["unrealized"]))}).</li>'
-               '<li>Months are on the accrual basis, the same as the monthly income statement: a bill counts in the '
+               '<li>Months are on the accrual basis, the same as the monthly Profit and Loss Statement: a bill counts in the '
                'month the service happened.</li>')
     for j, mth in enumerate(sorted(D["inc_notes"])):
         out.append(f'<li>{"★" * (j + 1)} {mth}: {e("; ".join(D["inc_notes"][mth]))}</li>')
@@ -479,8 +479,8 @@ def build_html(D, goal, theme=""):
     svg, idx, ranked = cats_svg(D)
     out.append(f'<section><h2>4. Spending by category</h2><p class="sub">{e(D["labels"][idx[0]])} – '
                f'{e(D["labels"][idx[-1]])}, living spending (taxes excluded), top 8</p>{svg}</section>')
-    out.append(f'<section><h2>Checks</h2><p class="sub">{len(D["checks"])} month checks against the balance sheet '
-               'and income statement views: all match to the cent.</p></section>')
+    out.append(f'<section><h2>Checks</h2><p class="sub">{len(D["checks"])} month checks against the Balance Sheet '
+               'and Profit and Loss Statement views: all match to the cent.</p></section>')
     out.append('<details class="gloss"><summary>Glossary</summary>' + T.glossary_html() + "</details>")
     out.append(f"</main>{'<script>' + S.TIP_JS + '</script>' if not theme else ''}{CHART_JS}</body></html>")
     return "".join(out)
@@ -542,7 +542,7 @@ def pngs(D, out, goal):
         ax.axhline(goal, color=COLORS["goal"], ls="--", lw=1.4, label=f"${goal // 1000}k goal")
         save(f, ax, "1-cash")
         # 2 income vs spending
-        f, ax = fig("Income vs spending by month (taxes separate)")
+        f, ax = fig("Profit and Loss by month: income vs expenses (taxes separate)")
         base = [0] * len(x)
         for k, lab in INCOME:
             v = [c / 100 for c in D["income"][k]]
@@ -619,7 +619,7 @@ def build_xlsx(path, D):
            [d(D["cash"]["goal_cash"][i]), d(D["cash"]["trips"][i]), d(D["cash"]["total"][i])] for i in n])
     sheet("Cash weekly", ["Friday", "Counted toward goal", "Trips fund"],
           [[w, d(g), d(t)] for w, g, t in zip(D["weekly"]["labels"], D["weekly"]["goal_cash"], D["weekly"]["trips"])])
-    sheet("Income-Spending", ["Month"] + [l for _, l in INCOME] + ["Income total", "Living spending", "Taxes",
+    sheet("Profit and Loss", ["Month"] + [l for _, l in INCOME] + ["Income total", "Living spending", "Taxes",
                                                                    "Net savings", "Unrealized (excluded)"],
           [[D["months"][i]] + [d(D["income"][k][i]) for k, _ in INCOME] +
            [d(D["income_total"][i]), d(D["living"][i]), d(D["taxes"][i]), d(D["net_savings"][i]),
@@ -639,12 +639,12 @@ def build_xlsx(path, D):
 # ---------------------------------------------------------------- weekly report hook
 
 def weekly_section(db, as_of, goal=CFG["goal"], trips=TRIPS):
-    """Compact cash and income-vs-spending charts for weekly.py (HTML fragment incl. CSS and JS)."""
+    """Compact cash and Profit and Loss charts for weekly.py (HTML fragment incl. CSS and JS)."""
     D = collect(db, as_of, trips)
     return (f"<style>{CHART_CSS}</style>"
             '<p class="sub" style="margin-top:12px">Cash toward goal, month ends (trips fund dashed, not counted)</p>'
             + cash_svg(D, "w-cash", goal, compact=True) +
-            '<p class="sub" style="margin-top:12px">Income vs spending by month (taxes separate; line = net savings)</p>'
+            '<p class="sub" style="margin-top:12px">Profit and Loss by month: income vs expenses (taxes separate; line = net savings)</p>'
             + income_svg(D, "w-inc", compact=True) + CHART_JS)
 
 
