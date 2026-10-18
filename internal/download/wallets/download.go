@@ -35,6 +35,7 @@ var (
 	KaspaAPI    = "https://api.kaspa.org"
 	BTCAPIs     = []string{"https://blockstream.info/api", "https://mempool.space/api"}
 	LTCAPIs     = []string{"https://litecoinspace.org/api"}
+	LTCFallback = "https://api.blockcypher.com/v1/ltc/main" // BlockCypher; answer is converted to the Esplora shape
 	SolanaRPC   = "https://api.mainnet-beta.solana.com"
 	KrakenAPI   = "https://api.kraken.com/0/public"
 	GeckoAPI    = "https://api.coingecko.com/api/v3"
@@ -244,6 +245,13 @@ func (r *run) download(cfg *Config, root, day string) (*Pull, error) {
 				}
 			case ch.Chain == "bitcoin" || ch.Chain == "litecoin":
 				bal, used, file, err := r.esplora(tag, ch)
+				if err != nil && ch.Optional {
+					var note string
+					if bal, used, file, note, err = r.carryForward(tag, ch, err); err == nil {
+						r.logf("  WARNING %s %s: %s\n", w.Name, ch.Chain, note)
+						pull.Notes = append(pull.Notes, w.Name+" "+ch.Chain+": "+note)
+					}
+				}
 				if err != nil {
 					return nil, fmt.Errorf("%s %s: %w", w.Name, ch.Chain, err)
 				}
@@ -504,7 +512,71 @@ func (r *run) esplora(tag string, ch Chain) (string, bool, string, error) {
 		}
 		return fmtMinor(big.NewInt(sat), 8), used, name, nil
 	}
+	if ch.Chain == "litecoin" && LTCFallback != "" {
+		name := tag + "_address.json"
+		b, err := r.f.do(r.ctx, "GET", LTCFallback+"/addrs/"+url.PathEscape(ch.Address)+"/balance", nil, ch.Chain+" address (fallback)")
+		if err == nil {
+			var bc struct {
+				TotalReceived int64 `json:"total_received"`
+				TotalSent     int64 `json:"total_sent"`
+				Balance       int64 `json:"balance"`
+				NTx           int64 `json:"n_tx"`
+				UnconfNTx     int64 `json:"unconfirmed_n_tx"`
+			}
+			if err = json.Unmarshal(b, &bc); err == nil && bc.TotalReceived-bc.TotalSent == bc.Balance {
+				// store in the Esplora shape so downstream readers need no special case
+				eb, _ := json.Marshal(map[string]any{
+					"chain_stats":   map[string]int64{"funded_txo_sum": bc.TotalReceived, "spent_txo_sum": bc.TotalSent, "tx_count": bc.NTx},
+					"mempool_stats": map[string]int64{"tx_count": bc.UnconfNTx},
+					"source":        "blockcypher",
+				})
+				if err := r.save(name, eb); err != nil {
+					return "", false, "", err
+				}
+				r.logf("  litecoin: primary lookup failed, used fallback (history not fetched)\n")
+				return fmtMinor(big.NewInt(bc.Balance), 8), bc.NTx+bc.UnconfNTx > 0, name, nil
+			}
+			lastErr = fmt.Errorf("%s address (fallback): unexpected response", ch.Chain)
+		} else {
+			lastErr = err
+		}
+	}
 	return "", false, "", lastErr
+}
+
+// carryForward serves an optional chain whose lookups all failed: the newest earlier pull's
+// raw file for it is reused when its balance is within the chain's dust_max (default 0).
+func (r *run) carryForward(tag string, ch Chain, cause error) (bal string, used bool, file, note string, err error) {
+	file = tag + "_address.json"
+	fail := func(why string) (string, bool, string, string, error) {
+		return "", false, "", "", fmt.Errorf("%v (optional, but %s)", cause, why)
+	}
+	if !r.copyEarlier(file) {
+		return fail("no earlier balance to carry forward")
+	}
+	b, rerr := os.ReadFile(filepath.Join(r.dir, file))
+	var raw struct {
+		ChainStats   map[string]int64 `json:"chain_stats"`
+		MempoolStats map[string]int64 `json:"mempool_stats"`
+	}
+	if rerr != nil || json.Unmarshal(b, &raw) != nil || raw.ChainStats == nil {
+		os.Remove(filepath.Join(r.dir, file))
+		return fail("earlier balance unreadable")
+	}
+	sat := raw.ChainStats["funded_txo_sum"] - raw.ChainStats["spent_txo_sum"]
+	max := big.NewInt(0)
+	if ch.DustMax != "" {
+		if m, perr := parseDec(ch.DustMax, 8); perr == nil {
+			max = m
+		}
+	}
+	if big.NewInt(sat).Cmp(max) > 0 {
+		os.Remove(filepath.Join(r.dir, file))
+		return fail("last known balance is above dust_max")
+	}
+	r.files = append(r.files, file)
+	return fmtMinor(big.NewInt(sat), 8), raw.ChainStats["tx_count"]+raw.MempoolStats["tx_count"] > 0, file,
+		"lookup failed (" + cause.Error() + "); carried forward last known dust balance " + fmtMinor(big.NewInt(sat), 8) + " from the previous pull", nil
 }
 
 // ---------- solana ----------

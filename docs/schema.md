@@ -322,7 +322,7 @@ Entry ids: `coinbase:<refid>`, `opening:coinbase`, `valuation:coinbase:<date>`.
 `finance download wallets [--history]` reads the local `$FINANCE_DATA/config/wallets.yaml`
 (template `config/wallets.data.example.yaml`) and saves public explorer responses to
 `raw/wallets/<YYYY-MM-DD>/` (0600): Kaspa (api.kaspa.org; explicit addresses or receive/change
-addresses derived from an account-level kpub with a gap limit), Bitcoin/Litecoin (Esplora),
+addresses derived from an account-level kpub with a gap limit), Bitcoin/Litecoin (Esplora; Litecoin falls back to BlockCypher; a chain flagged `optional: true` with a dust-only last balance degrades to a warning),
 Solana (public RPC, SOL + SPL tokens), Monero (the wallet app's CSV export, carried forward),
 USD prices (Kraken public ticker, CoinGecko cross-check) and, with `--history`, every used
 address's transactions and daily OHLC. `balances.json`, `labels.json`, `MANIFEST.md` and

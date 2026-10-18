@@ -47,6 +47,11 @@ type Chain struct {
 	// File: a transaction-history export saved in the pull folder (e.g. Cake Wallet CSV for
 	// monero, which has no public balance lookup). Its balance is computed from the rows.
 	File string `yaml:"file"`
+	// Optional: a failed lookup of this chain is a logged warning, not a failed pull, provided
+	// the last known balance (carried forward from the newest earlier pull) is <= DustMax.
+	// A failure with a larger (or unknown) last balance stays an error (REVIEW).
+	Optional bool   `yaml:"optional"`
+	DustMax  string `yaml:"dust_max"` // coin units, default "0" (only a zero balance may be carried)
 }
 
 // Coin is the ledger commodity of a chain's native asset and its decimals.
@@ -108,6 +113,14 @@ func LoadConfig(path string) (*Config, error) {
 			}
 			if ch.File != "" && ch.Chain != "monero" {
 				return nil, fmt.Errorf("wallet %s: file is only supported for monero (Cake Wallet CSV)", w.Name)
+			}
+			if ch.DustMax != "" {
+				if !ch.Optional {
+					return nil, fmt.Errorf("wallet %s chain %s: dust_max needs optional: true", w.Name, ch.Chain)
+				}
+				if _, err := parseDec(ch.DustMax, 12); err != nil {
+					return nil, fmt.Errorf("wallet %s chain %s: bad dust_max", w.Name, ch.Chain)
+				}
 			}
 			if ch.GapLimit <= 0 {
 				ch.GapLimit = 20

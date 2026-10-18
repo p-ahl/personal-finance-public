@@ -11,7 +11,8 @@ wallets:
     chains:
       - {chain: kaspa,    address: "kaspa:REPLACE_ME"}
       - {chain: bitcoin,  address: "bc1REPLACE_ME"}
-      - {chain: litecoin, address: "ltc1REPLACE_ME"}
+      # optional: true = a failed lookup is a logged warning (not REVIEW) while the last known balance is <= dust_max
+      - {chain: litecoin, address: "ltc1REPLACE_ME", optional: true, dust_max: "0.001"}
       - {chain: solana,   address: "REPLACE_ME"}      # SOL + SPL tokens (USDC, USDT, PYUSD, others)
     note: optional free text (kept in the local DB)
   - name: MobileKaspa
